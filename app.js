@@ -5,7 +5,20 @@ const emotions = ["喜悅", "感恩", "寧靜", "興趣", "希望", "自豪", "�
 const goalSlots = 3;
 const roleSlots = 2;
 const importantSlots = 5;
+const victorySlots = 3;
+const weeklyReviewQuestions = [
+  "在過去的 7 天裡，你最重要的進展是什麼？",
+  "你從中學到了什麼？",
+  "在過去的 7 天裡，有什麼事讓你引以為傲？",
+  "目前你的感受是什麼呢？",
+  "有什麼迫不及待想實施的好想法呢？",
+  "回顧上禮拜「你想像最好的自己」，在哪些方面你更前進了呢？",
+  "再一個 7 天之後，你所能想像最好的自己是什麼樣子呢？",
+  "再問自己一次，你有什麼迫不及待想實施的好想法，讓你往最好的自己前進？"
+];
 const roleColors = ["#800000", "#000080", "#808000", "#800080", "#008080", "#c0c0c0"];
+const officeEventRoleValue = "office-event";
+const officeEventColor = "#b42318";
 const scheduleStartHour = 6;
 const scheduleEndHour = 23;
 const hourHeightPx = 72;
@@ -20,8 +33,13 @@ const defaultRoles = [
 ];
 
 const storageKey = "begin-with-end-week-plan";
+const weekStoragePrefix = `${storageKey}:week:`;
 const supabaseSettingsKey = "begin-with-end-supabase-settings";
 let state = loadState();
+let selectedVictoryDate = toDateInputValue(new Date());
+let lookbackMode = "daily";
+let selectedLookbackDate = toDateInputValue(new Date());
+let selectedLookbackRoleIndex = "all";
 let reminderTimer = null;
 let deferredInstallPrompt = null;
 let supabaseClient = null;
@@ -53,12 +71,12 @@ function createEmptyWeek(startDate = getSunday()) {
     schedule: [],
     renewal: Object.fromEntries(renewalAreas.map((area) => [area, ""])),
     emotions: Object.fromEntries(emotions.map((name) => [name, { score: 0, note: "" }])),
+    dailyWins: {},
     weeklyReview: "",
+    weeklyReviewAnswers: Array(weeklyReviewQuestions.length).fill(""),
     settings: {
       reminderTime: "21:30",
       reminderEnabled: false,
-      aiMode: "local",
-      apiKey: "",
       supabase: {
         url: "",
         anonKey: "",
@@ -149,7 +167,12 @@ function migrateLegacyRoles(roles) {
 function normalizeImportant(important) {
   return Array.from({ length: 7 }, (_, dayIndex) => {
     const day = Array.isArray(important?.[dayIndex]) ? important[dayIndex] : [important?.[dayIndex] || ""];
-    return [...day, ...Array(importantSlots).fill("")].slice(0, importantSlots);
+    return [...day, ...Array(importantSlots).fill("")].slice(0, importantSlots).map((item) => {
+      if (item && typeof item === "object") {
+        return { text: item.text || "", done: Boolean(item.done) };
+      }
+      return { text: item || "", done: false };
+    });
   });
 }
 
@@ -169,7 +192,7 @@ function normalizeSchedule(schedule) {
       dayIndex: Number(event.dayIndex) || 0,
       start: event.start || "06:00",
       end: event.end || "07:00",
-      roleIndex: Number(event.roleIndex) || 0
+      roleIndex: normalizeRoleIndex(event.roleIndex)
     }));
   }
 
@@ -192,6 +215,50 @@ function normalizeSchedule(schedule) {
   return events;
 }
 
+function normalizeRoleIndex(value) {
+  if (value === officeEventRoleValue) return officeEventRoleValue;
+  const index = Number(value);
+  return Number.isFinite(index) ? index : 0;
+}
+
+function createEmptyVictoryDay() {
+  const createItem = () => ({ text: "", note: "", roleIndex: "" });
+  return {
+    today: Array.from({ length: victorySlots }, createItem),
+    tomorrow: Array.from({ length: victorySlots }, createItem)
+  };
+}
+
+function normalizeVictoryItems(items) {
+  const source = Array.isArray(items) ? items : [];
+  return Array.from({ length: victorySlots }, (_, index) => {
+    const item = source[index] || {};
+    return {
+      text: item.text || item.win || "",
+      note: item.note || item.reflection || item.meaning || "",
+      roleIndex: item.roleIndex === "" || item.roleIndex === undefined ? "" : normalizeRoleIndex(item.roleIndex)
+    };
+  });
+}
+
+function normalizeDailyWins(dailyWins) {
+  if (!dailyWins || typeof dailyWins !== "object") return {};
+  return Object.fromEntries(Object.entries(dailyWins).map(([date, value]) => [
+    date,
+    {
+      today: normalizeVictoryItems(value?.today),
+      tomorrow: normalizeVictoryItems(value?.tomorrow)
+    }
+  ]));
+}
+
+function normalizeWeeklyReviewAnswers(answers, legacyReview = "") {
+  const source = Array.isArray(answers) ? answers : [];
+  const normalized = Array.from({ length: weeklyReviewQuestions.length }, (_, index) => source[index] || "");
+  if (!normalized.some(Boolean) && legacyReview) normalized[0] = legacyReview;
+  return normalized;
+}
+
 function normalizeState(data) {
   const base = createEmptyWeek();
   const merged = { ...base, ...data };
@@ -202,6 +269,8 @@ function normalizeState(data) {
     schedule: normalizeSchedule(merged.schedule),
     renewal: { ...base.renewal, ...merged.renewal },
     emotions: { ...base.emotions, ...merged.emotions },
+    dailyWins: normalizeDailyWins(merged.dailyWins),
+    weeklyReviewAnswers: normalizeWeeklyReviewAnswers(merged.weeklyReviewAnswers, merged.weeklyReview),
     settings: { ...base.settings, ...merged.settings }
   };
 }
@@ -210,14 +279,46 @@ function loadState() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) return createEmptyWeek();
   try {
-    return normalizeState(JSON.parse(saved));
+    const current = normalizeState(JSON.parse(saved));
+    const weekSaved = localStorage.getItem(getWeekStorageKey(current.weekStart));
+    return weekSaved ? normalizeState(JSON.parse(weekSaved)) : current;
   } catch {
     return createEmptyWeek();
   }
 }
 
-function saveState(showToast = false) {
+function getWeekStorageKey(weekStart) {
+  return `${weekStoragePrefix}${weekStart}`;
+}
+
+function persistStateLocally() {
   localStorage.setItem(storageKey, JSON.stringify(state));
+  localStorage.setItem(getWeekStorageKey(state.weekStart), JSON.stringify(state));
+}
+
+function loadWeekState(weekStart, carry = {}) {
+  const saved = localStorage.getItem(getWeekStorageKey(weekStart));
+  if (saved) {
+    try {
+      return normalizeState(JSON.parse(saved));
+    } catch {
+      localStorage.removeItem(getWeekStorageKey(weekStart));
+    }
+  }
+
+  const next = createEmptyWeek(new Date(`${weekStart}T00:00:00`));
+  const carriedRoles = carry.roles || state?.roles || defaultRoles;
+  next.roles = carriedRoles.map((role, index) => ({
+    roles: [...(role.roles || []), ...Array(roleSlots).fill("")].slice(0, roleSlots),
+    goals: Array(goalSlots).fill(""),
+    color: normalizeHexColor(role.color, roleColors[index % roleColors.length])
+  }));
+  next.settings = structuredClone(carry.settings || state?.settings || createEmptyWeek().settings);
+  return normalizeState(next);
+}
+
+function saveState(showToast = false) {
+  persistStateLocally();
   if (showToast) {
     const button = document.querySelector("#saveBtn");
     button.textContent = "已儲存";
@@ -226,6 +327,7 @@ function saveState(showToast = false) {
     }, 900);
   }
   updateStats();
+  renderLookback();
   scheduleReminder();
   queueCloudSave();
 }
@@ -247,7 +349,7 @@ function loadSupabaseSettings() {
 function saveSupabaseSettings(settings) {
   localStorage.setItem(supabaseSettingsKey, JSON.stringify(settings));
   state.settings.supabase = settings;
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateLocally();
 }
 
 function getPlanPayload() {
@@ -255,7 +357,6 @@ function getPlanPayload() {
     ...state,
     settings: {
       ...state.settings,
-      apiKey: "",
       supabase: {
         url: "",
         anonKey: "",
@@ -370,7 +471,7 @@ async function loadPlanFromCloud() {
   state = normalizeState(data.plan);
   state.settings.supabase = settings;
   renderAll();
-  localStorage.setItem(storageKey, JSON.stringify(state));
+  persistStateLocally();
   updateSupabaseStatus(`已載入雲端資料。最後更新：${new Date(data.updated_at).toLocaleString("zh-TW")}`);
 }
 
@@ -382,6 +483,7 @@ function bindNavigation() {
       button.classList.add("active");
       document.querySelector(`#${button.dataset.view}`).classList.add("active");
       updateStats();
+      if (button.dataset.view === "lookback") renderLookback();
     });
   });
 }
@@ -420,19 +522,12 @@ function renderRoles() {
       const values = roleList.innerText.split("\n").map((value) => value.trim()).filter(Boolean);
       state.roles[index].roles = [...values, ...Array(roleSlots).fill("")].slice(0, roleSlots);
       saveState();
+      renderRoleSettings();
     });
-
-    const editColor = document.createElement("button");
-    editColor.type = "button";
-    editColor.className = "role-color-edit";
-    editColor.textContent = "✎";
-    editColor.title = "編輯背景色";
-    editColor.setAttribute("aria-label", "編輯背景色");
-    editColor.addEventListener("click", () => openRoleColorEditor(index));
 
     const roleCard = document.createElement("div");
     roleCard.className = "role-card";
-    roleCard.append(roleList, editColor);
+    roleCard.append(roleList);
 
     const goals = document.createElement("div");
     goals.className = "goal-list";
@@ -447,19 +542,68 @@ function renderRoles() {
       goals.append(goal);
     });
 
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "×";
-    remove.title = "刪除";
-    remove.addEventListener("click", () => {
-      state.roles.splice(index, 1);
+    row.append(roleCard, goals);
+    list.append(row);
+  });
+}
+
+function renderRoleSettings() {
+  const list = document.querySelector("#roleSettingsList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  state.roles.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = "role-settings-row";
+
+    const swatch = document.createElement("input");
+    swatch.type = "color";
+    swatch.value = getRoleColor(index);
+    swatch.title = "角色背景色";
+    swatch.setAttribute("aria-label", `${getRoleGroupName(index)} 背景色`);
+    swatch.addEventListener("input", () => {
+      state.roles[index].color = swatch.value;
       renderRoles();
+      renderSchedule();
       saveState();
     });
 
-    row.append(roleCard, goals, remove);
+    const labels = document.createElement("div");
+    labels.className = "role-settings-fields";
+    item.roles.forEach((value, roleIndex) => {
+      const input = document.createElement("input");
+      input.value = value;
+      input.placeholder = `角色名稱 ${roleIndex + 1}`;
+      input.addEventListener("input", () => {
+        state.roles[index].roles[roleIndex] = input.value;
+        renderRoles();
+        saveState();
+      });
+      labels.append(input);
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger-button";
+    remove.textContent = "刪除";
+    remove.addEventListener("click", () => removeRole(index));
+
+    row.append(swatch, labels, remove);
     list.append(row);
   });
+}
+
+function removeRole(index) {
+  state.roles.splice(index, 1);
+  state.schedule = state.schedule.map((event) => {
+    if (event.roleIndex === index) return { ...event, roleIndex: 0 };
+    if (event.roleIndex > index) return { ...event, roleIndex: event.roleIndex - 1 };
+    return event;
+  });
+  renderRoles();
+  renderRoleSettings();
+  renderSchedule();
+  saveState();
 }
 
 function openRoleColorEditor(index) {
@@ -491,12 +635,12 @@ function renderImportantInputs() {
   state.important.forEach((items, dayIndex) => {
     const day = document.createElement("div");
     day.className = "important-day";
-    items.forEach((value, itemIndex) => {
+    items.forEach((item, itemIndex) => {
       const input = document.createElement("input");
-      input.value = value;
+      input.value = item.text;
       input.placeholder = `要事 ${itemIndex + 1}`;
       input.addEventListener("input", () => {
-        state.important[dayIndex][itemIndex] = input.value;
+        state.important[dayIndex][itemIndex].text = input.value;
         saveState();
       });
       day.append(input);
@@ -546,10 +690,23 @@ function renderSchedule() {
 
         item.type = "button";
         item.className = "schedule-event";
-        item.style.backgroundColor = getRoleColor(calendarEvent.roleIndex);
+        item.title = `${calendarEvent.title || "未命名行程"} ${calendarEvent.start}-${calendarEvent.end}`;
+        if (height < 36) {
+          item.classList.add("tiny-event");
+          item.innerHTML = `<strong>${calendarEvent.title || "未命名行程"}</strong>`;
+        } else if (height < 58) {
+          item.classList.add("compact-event");
+          item.innerHTML = `<strong>${calendarEvent.title || "未命名行程"}</strong><span>${calendarEvent.start}-${calendarEvent.end}</span>`;
+        } else {
+          item.innerHTML = `<strong>${calendarEvent.title || "未命名行程"}</strong><span>${calendarEvent.start}-${calendarEvent.end}</span>`;
+        }
+        if (calendarEvent.roleIndex === officeEventRoleValue) {
+          item.classList.add("office-event");
+        } else {
+          item.style.backgroundColor = getRoleColor(calendarEvent.roleIndex);
+        }
         item.style.top = `${top}px`;
         item.style.height = `${height}px`;
-        item.innerHTML = `<strong>${calendarEvent.title || "未命名行程"}</strong><span>${calendarEvent.start}-${calendarEvent.end}</span>`;
         item.addEventListener("click", (clickEvent) => {
           clickEvent.stopPropagation();
           openScheduleEditor({ eventId: calendarEvent.id });
@@ -576,10 +733,12 @@ function timeFromCalendarClick(event, column) {
 }
 
 function getRoleGroupName(index) {
+  if (index === officeEventRoleValue) return "辦公室事件";
   return state.roles[index]?.roles.filter(Boolean).join(" / ") || `角色組 ${index + 1}`;
 }
 
 function getRoleColor(index) {
+  if (index === officeEventRoleValue) return officeEventColor;
   return normalizeHexColor(state.roles[index]?.color, roleColors[index % roleColors.length]);
 }
 
@@ -592,6 +751,11 @@ function syncRoleOptions() {
     option.textContent = getRoleGroupName(index);
     select.append(option);
   });
+
+  const officeOption = document.createElement("option");
+  officeOption.value = officeEventRoleValue;
+  officeOption.textContent = "辦公室事件";
+  select.append(officeOption);
 }
 
 function openScheduleEditor({ dayIndex = 0, start: startTime = null, eventId = null }) {
@@ -630,7 +794,7 @@ function saveScheduleEvent() {
     dayIndex: Number(document.querySelector("#scheduleDay").value),
     start,
     end,
-    roleIndex: Number(document.querySelector("#scheduleRole").value)
+    roleIndex: parseRoleIndex(document.querySelector("#scheduleRole").value)
   };
   const index = state.schedule.findIndex((item) => item.id === id);
   if (index >= 0) state.schedule[index] = event;
@@ -638,6 +802,10 @@ function saveScheduleEvent() {
   closeScheduleEditor();
   renderSchedule();
   saveState();
+}
+
+function parseRoleIndex(value) {
+  return value === officeEventRoleValue ? officeEventRoleValue : Number(value);
 }
 
 function deleteScheduleEvent() {
@@ -666,57 +834,431 @@ function renderRenewal() {
   });
 }
 
-function renderEmotions() {
-  const grid = document.querySelector("#emotionGrid");
-  grid.innerHTML = "";
-  emotions.forEach((name) => {
-    const item = state.emotions[name] || { score: 0, note: "" };
-    const block = document.createElement("article");
-    block.className = "emotion-item";
-    block.innerHTML = `
-      <header>
-        <strong>${name}</strong>
-        <output>${item.score}</output>
-      </header>
-    `;
+function addDaysToDateInput(dateValue, days) {
+  const date = new Date(`${dateValue}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return toDateInputValue(date);
+}
 
-    const range = document.createElement("input");
-    range.type = "range";
-    range.min = "0";
-    range.max = "10";
-    range.value = item.score;
+function getVictoryDay(dateValue = selectedVictoryDate) {
+  if (!state.dailyWins[dateValue]) {
+    state.dailyWins[dateValue] = createEmptyVictoryDay();
+  }
+  return state.dailyWins[dateValue];
+}
+
+function renderVictoryRoleSelect(value, onChange) {
+  const select = document.createElement("select");
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "不指定角色";
+  select.append(empty);
+
+  state.roles.forEach((_, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = getRoleGroupName(index);
+    select.append(option);
+  });
+
+  select.value = value === "" || value === undefined ? "" : String(value);
+  select.addEventListener("change", () => onChange(select.value === "" ? "" : Number(select.value)));
+  return select;
+}
+
+function renderVictoryItems(container, items, sectionKey) {
+  container.innerHTML = "";
+  items.forEach((item, index) => {
+    const block = document.createElement("article");
+    block.className = "victory-item";
+
+    const header = document.createElement("header");
+    const title = document.createElement("strong");
+    title.textContent = sectionKey === "today" ? `今天的第 ${index + 1} 個勝利` : `明天的第 ${index + 1} 個勝利`;
+    header.append(title, renderVictoryRoleSelect(item.roleIndex, (value) => {
+      item.roleIndex = value;
+      saveState();
+    }));
+
+    const text = document.createElement("textarea");
+    text.rows = 2;
+    text.value = item.text;
+    text.placeholder = sectionKey === "today" ? "今天有什麼值得為自己喝采的事？" : "明天想要為自己完成什麼事？";
+    text.addEventListener("input", () => {
+      item.text = text.value;
+      saveState();
+    });
 
     const note = document.createElement("textarea");
-    note.placeholder = `本週哪個片刻讓你感到${name}？`;
+    note.rows = 2;
     note.value = item.note;
-
-    range.addEventListener("input", () => {
-      state.emotions[name].score = Number(range.value);
-      block.querySelector("output").textContent = range.value;
-      saveState();
-    });
+    note.placeholder = sectionKey === "today" ? "勝利感言" : "對我的意義";
     note.addEventListener("input", () => {
-      state.emotions[name].note = note.value;
+      item.note = note.value;
       saveState();
     });
 
-    block.append(range, note);
-    grid.append(block);
+    block.append(header, text, note);
+    container.append(block);
+  });
+}
+
+function renderVictories() {
+  const dateInput = document.querySelector("#victoryDate");
+  if (!dateInput) return;
+  dateInput.value = selectedVictoryDate;
+  const day = getVictoryDay();
+  renderVictoryItems(document.querySelector("#todayVictories"), day.today, "today");
+  renderVictoryItems(document.querySelector("#tomorrowVictories"), day.tomorrow, "tomorrow");
+}
+
+function renderWeeklyReflection() {
+  const list = document.querySelector("#weeklyReflectionList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  weeklyReviewQuestions.forEach((question, index) => {
+    const label = document.createElement("label");
+    label.className = "reflection-item";
+    const prompt = document.createElement("span");
+    prompt.textContent = question;
+    const textarea = document.createElement("textarea");
+    textarea.rows = 4;
+    textarea.value = state.weeklyReviewAnswers[index] || "";
+    textarea.placeholder = "寫下你的回顧";
+    textarea.addEventListener("input", () => {
+      state.weeklyReviewAnswers[index] = textarea.value;
+      saveState();
+    });
+    label.append(prompt, textarea);
+    list.append(label);
+  });
+}
+
+function bindVictoryActions() {
+  const dateInput = document.querySelector("#victoryDate");
+  dateInput.addEventListener("change", () => {
+    selectedVictoryDate = dateInput.value || toDateInputValue(new Date());
+    renderVictories();
+    saveState();
+  });
+  document.querySelector("#prevVictoryDayBtn").addEventListener("click", () => {
+    selectedVictoryDate = addDaysToDateInput(selectedVictoryDate, -1);
+    renderVictories();
+  });
+  document.querySelector("#nextVictoryDayBtn").addEventListener("click", () => {
+    selectedVictoryDate = addDaysToDateInput(selectedVictoryDate, 1);
+    renderVictories();
+  });
+}
+
+function getWeekDates() {
+  const start = new Date(`${state.weekStart}T00:00:00`);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return toDateInputValue(date);
+  });
+}
+
+function getDateOffsetInWeek(dateValue) {
+  const start = new Date(`${state.weekStart}T00:00:00`);
+  const date = new Date(`${dateValue}T00:00:00`);
+  return Math.round((date - start) / 86400000);
+}
+
+function isFilled(value) {
+  return String(value || "").trim().length > 0;
+}
+
+function createTextBlock(title, lines) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("div");
+  list.className = "lookback-list";
+
+  const filtered = lines.filter((line) => isFilled(line));
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "目前還沒有內容。";
+    list.append(empty);
+  } else {
+    filtered.forEach((line) => {
+      const item = document.createElement("p");
+      item.textContent = line;
+      list.append(item);
+    });
+  }
+
+  block.append(heading, list);
+  return block;
+}
+
+function createHeadlineBlock(title, subtitle) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel lookback-headline";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const text = document.createElement("p");
+  text.textContent = subtitle;
+  block.append(heading, text);
+  return block;
+}
+
+function createRichBlock(title, items) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("div");
+  list.className = "lookback-list";
+
+  const filtered = items.filter((item) => item.title || item.meta || item.body);
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "目前還沒有內容。";
+    list.append(empty);
+  } else {
+    filtered.forEach((item) => {
+      const row = document.createElement("article");
+      row.className = "lookback-item";
+      if (item.title) {
+        const titleEl = document.createElement("strong");
+        titleEl.textContent = item.title;
+        row.append(titleEl);
+      }
+      if (item.meta) {
+        const meta = document.createElement("span");
+        meta.textContent = item.meta;
+        row.append(meta);
+      }
+      if (item.body) {
+        const body = document.createElement("p");
+        body.textContent = item.body;
+        row.append(body);
+      }
+      list.append(row);
+    });
+  }
+
+  block.append(heading, list);
+  return block;
+}
+
+function createDailyTodoBlock(title, items, dayIndex) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("div");
+  list.className = "todo-list";
+
+  const filtered = items
+    .map((item, index) => ({ ...item, index }))
+    .filter((item) => isFilled(item.text));
+
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "目前還沒有內容。";
+    list.append(empty);
+  } else {
+    filtered.forEach((item) => {
+      const label = document.createElement("label");
+      label.className = "todo-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = item.done;
+      const text = document.createElement("span");
+      text.textContent = item.text;
+      checkbox.addEventListener("change", () => {
+        state.important[dayIndex][item.index].done = checkbox.checked;
+        saveState();
+      });
+      label.append(checkbox, text);
+      list.append(label);
+    });
+  }
+
+  block.append(heading, list);
+  return block;
+}
+
+function createWeeklyTodoBlock(title, items) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("div");
+  list.className = "todo-list";
+
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "目前還沒有內容。";
+    list.append(empty);
+  } else {
+    items.forEach((item) => {
+      const row = document.createElement("p");
+      row.className = item.done ? "todo-readonly done" : "todo-readonly";
+      row.textContent = item.label;
+      list.append(row);
+    });
+  }
+
+  block.append(heading, list);
+  return block;
+}
+
+function getVictoryItemsForDate(dateValue) {
+  const day = state.dailyWins[dateValue];
+  if (!day) return [];
+  return [
+    ...day.today.map((item, index) => ({ ...item, label: `今天 ${index + 1}` })),
+    ...day.tomorrow.map((item, index) => ({ ...item, label: `明天 ${index + 1}` }))
+  ].filter((item) => isFilled(item.text) || isFilled(item.note));
+}
+
+function getWeeklyVictoryItems() {
+  return getWeekDates().flatMap((date) => getVictoryItemsForDate(date).map((item) => ({ ...item, date })));
+}
+
+function formatScheduleItem(event) {
+  return {
+    title: event.title || "未命名行程",
+    meta: `${dayNames[event.dayIndex]} ${event.start}-${event.end}｜${getRoleGroupName(event.roleIndex)}`
+  };
+}
+
+function renderDailyLookback(container) {
+  const offset = getDateOffsetInWeek(selectedLookbackDate);
+  const dateTitle = `${selectedLookbackDate} ${offset >= 0 && offset < 7 ? dayNames[offset] : ""}`.trim();
+  const important = offset >= 0 && offset < 7 ? state.important[offset] : [];
+  const schedules = offset >= 0 && offset < 7
+    ? state.schedule.filter((event) => event.dayIndex === offset).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))
+    : [];
+  const wins = getVictoryItemsForDate(selectedLookbackDate).map((item) => ({
+    title: `${item.label}${item.roleIndex !== "" && item.roleIndex !== undefined ? `｜${getRoleGroupName(item.roleIndex)}` : ""}`,
+    body: [item.text, item.note].filter(isFilled).join("｜")
+  }));
+
+  container.append(
+    createHeadlineBlock(dateTitle, "這一天的要事、行程與三個勝利。"),
+    createDailyTodoBlock("今日要事", important || [], offset),
+    createRichBlock("當日行程", schedules.map(formatScheduleItem)),
+    createRichBlock("三個勝利", wins)
+  );
+}
+
+function renderWeeklyLookback(container) {
+  const isAllRoles = selectedLookbackRoleIndex === "all";
+  const roleIndex = isAllRoles ? null : Math.min(Number(selectedLookbackRoleIndex) || 0, Math.max(state.roles.length - 1, 0));
+  const roleItems = isAllRoles
+    ? state.roles.flatMap((role) => role.goals.filter(isFilled).map((goal) => ({ title: goal })))
+    : (state.roles[roleIndex]?.goals || []).filter(isFilled).map((goal) => ({ title: goal }));
+  const importantItems = getWeekDates().flatMap((date, dayIndex) => (
+    state.important[dayIndex]
+      .filter((item) => isFilled(item.text))
+      .map((item) => ({
+        label: `${dayNames[dayIndex]} ${date}｜${item.text}`,
+        done: item.done
+      }))
+  ));
+  const victoryItems = getWeeklyVictoryItems()
+    .filter((item) => isAllRoles || item.roleIndex === roleIndex)
+    .map((item) => ({
+      title: `${item.date}｜${item.label}${item.roleIndex !== "" && item.roleIndex !== undefined ? `｜${getRoleGroupName(item.roleIndex)}` : ""}`,
+      body: [item.text, item.note].filter(isFilled).join("｜")
+    }));
+  const reflectionItems = weeklyReviewQuestions.map((question, index) => ({
+    title: question,
+    body: state.weeklyReviewAnswers[index] || ""
+  })).filter((item) => isFilled(item.body));
+
+  container.append(
+    createRichBlock("本週目標", roleItems),
+    createWeeklyTodoBlock("每週要事", importantItems),
+    createRichBlock("三個勝利", victoryItems),
+    createRichBlock("週反思", reflectionItems)
+  );
+}
+
+function syncLookbackRoleOptions() {
+  const select = document.querySelector("#lookbackRole");
+  if (!select) return;
+  select.innerHTML = "";
+  const allOption = document.createElement("option");
+  allOption.value = "all";
+  allOption.textContent = "全部";
+  select.append(allOption);
+  state.roles.forEach((_, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = getRoleGroupName(index);
+    select.append(option);
+  });
+  select.value = selectedLookbackRoleIndex === "all" ? "all" : String(Math.min(Number(selectedLookbackRoleIndex) || 0, Math.max(state.roles.length - 1, 0)));
+}
+
+function setLookbackControlVisible(selector, visible) {
+  const element = document.querySelector(selector);
+  if (!element) return;
+  element.hidden = !visible;
+  element.style.display = visible ? "" : "none";
+}
+
+function renderLookback() {
+  const container = document.querySelector("#lookbackContent");
+  if (!container) return;
+  container.innerHTML = "";
+  document.querySelector("#lookbackDate").value = selectedLookbackDate;
+  setLookbackControlVisible("#lookbackDateControl", lookbackMode === "daily");
+  setLookbackControlVisible("#prevLookbackDayBtn", lookbackMode === "daily");
+  setLookbackControlVisible("#nextLookbackDayBtn", lookbackMode === "daily");
+  setLookbackControlVisible("#lookbackRoleControl", lookbackMode === "weekly");
+  if (lookbackMode === "weekly") syncLookbackRoleOptions();
+
+  if (lookbackMode === "daily") renderDailyLookback(container);
+  if (lookbackMode === "weekly") renderWeeklyLookback(container);
+}
+
+function bindLookbackActions() {
+  document.querySelectorAll(".lookback-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".lookback-tab").forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      lookbackMode = button.dataset.lookbackMode;
+      renderLookback();
+    });
+  });
+  document.querySelector("#lookbackDate").addEventListener("change", (event) => {
+    selectedLookbackDate = event.target.value || toDateInputValue(new Date());
+    renderLookback();
+  });
+  document.querySelector("#prevLookbackDayBtn").addEventListener("click", () => {
+    selectedLookbackDate = addDaysToDateInput(selectedLookbackDate, -1);
+    renderLookback();
+  });
+  document.querySelector("#nextLookbackDayBtn").addEventListener("click", () => {
+    selectedLookbackDate = addDaysToDateInput(selectedLookbackDate, 1);
+    renderLookback();
+  });
+  document.querySelector("#lookbackRole").addEventListener("change", (event) => {
+    selectedLookbackRoleIndex = event.target.value === "all" ? "all" : Number(event.target.value) || 0;
+    renderLookback();
   });
 }
 
 function syncSettingsControls() {
   const reminderTime = document.querySelector("#reminderTime");
   const reminderEnabled = document.querySelector("#reminderEnabled");
-  const aiMode = document.querySelector("#aiMode");
-  const apiKey = document.querySelector("#apiKey");
-  const weeklyReview = document.querySelector("#weeklyReview");
 
   reminderTime.value = state.settings.reminderTime;
   reminderEnabled.checked = state.settings.reminderEnabled;
-  aiMode.value = state.settings.aiMode;
-  apiKey.value = state.settings.apiKey;
-  weeklyReview.value = state.weeklyReview;
   syncSupabaseControls();
 }
 
@@ -735,9 +1277,6 @@ function syncSupabaseControls() {
 function bindSettings() {
   const reminderTime = document.querySelector("#reminderTime");
   const reminderEnabled = document.querySelector("#reminderEnabled");
-  const aiMode = document.querySelector("#aiMode");
-  const apiKey = document.querySelector("#apiKey");
-  const weeklyReview = document.querySelector("#weeklyReview");
 
   reminderTime.addEventListener("input", () => {
     state.settings.reminderTime = reminderTime.value;
@@ -746,18 +1285,6 @@ function bindSettings() {
   reminderEnabled.addEventListener("change", async () => {
     state.settings.reminderEnabled = reminderEnabled.checked;
     if (reminderEnabled.checked) await requestNotificationPermission();
-    saveState();
-  });
-  aiMode.addEventListener("change", () => {
-    state.settings.aiMode = aiMode.value;
-    saveState();
-  });
-  apiKey.addEventListener("input", () => {
-    state.settings.apiKey = apiKey.value;
-    saveState();
-  });
-  weeklyReview.addEventListener("input", () => {
-    state.weeklyReview = weeklyReview.value;
     saveState();
   });
 
@@ -806,15 +1333,12 @@ function bindSettings() {
 }
 
 function updateStats() {
-  const importantFilled = state.important.flat().filter((item) => item.trim()).length;
+  const importantFilled = state.important.flat().filter((item) => item.text.trim()).length;
   const scheduleFilled = state.schedule.length;
-  const emotionScores = Object.values(state.emotions).map((item) => Number(item.score || 0));
-  const emotionAverage = emotionScores.reduce((sum, score) => sum + score, 0) / emotionScores.length;
   const renewalFilled = Object.values(state.renewal).filter((item) => item.trim()).length;
 
   document.querySelector("#importantRate").textContent = `${Math.round((importantFilled / (7 * importantSlots)) * 100)}%`;
   document.querySelector("#scheduleCount").textContent = String(scheduleFilled);
-  document.querySelector("#emotionAverage").textContent = emotionAverage.toFixed(1);
   document.querySelector("#renewalCount").textContent = `${renewalFilled}/4`;
 }
 
@@ -847,60 +1371,29 @@ function scheduleReminder() {
   if (next <= now) next.setDate(next.getDate() + 1);
 
   reminderTimer = setTimeout(() => {
-    notify("現在可以花 3 分鐘更新今日要事、行程與正向情緒。");
+    notify("現在可以花 3 分鐘更新今日要事、行程與三個勝利。");
     scheduleReminder();
   }, next - now);
-}
-
-function generateFeedback() {
-  updateStats();
-  const importantFilled = state.important.flat().filter((item) => item.trim()).length;
-  const scheduleFilled = state.schedule.length;
-  const topEmotion = Object.entries(state.emotions)
-    .sort((a, b) => Number(b[1].score) - Number(a[1].score))[0];
-  const renewalFilled = Object.entries(state.renewal)
-    .filter(([, value]) => value.trim())
-    .map(([area]) => area);
-
-  const feedback = [
-    `本週你已經填寫 ${importantFilled}/35 格今日要事，行程格共有 ${scheduleFilled} 格有安排。`,
-    topEmotion && Number(topEmotion[1].score) > 0
-      ? `目前最明顯的正向情緒是「${topEmotion[0]}」，可以回頭看看是哪個事件帶來這種感受，讓它下週更容易重現。`
-      : "目前正向情緒尚未累積分數，可以先從今天最微小的一個好感受開始記錄。",
-    renewalFilled.length
-      ? `你已經照顧到 ${renewalFilled.join("、")}，週末回顧時可以檢查這些安排是否真的補充了能量。`
-      : "精益求精四個面向還沒有內容，建議先各寫下一個小行動，讓週計畫更平衡。",
-    state.settings.aiMode === "api"
-      ? "正式接 API 時，可以把角色目標、每日要事、情緒分數與週回顧送到後端，再由 AI 產生更個人化的建議。"
-      : "目前這是本機規則產生的草稿，不會把資料送出瀏覽器。"
-  ].join("\n\n");
-
-  document.querySelector("#aiFeedback").textContent = feedback;
 }
 
 function bindActions() {
   document.querySelector("#weekStart").value = state.weekStart;
   document.querySelector("#weekStart").addEventListener("change", (event) => {
-    state.weekStart = event.target.value;
-    renderWeekHeaders();
-    saveState();
+    switchWeek(event.target.value);
   });
+
+  document.querySelector("#prevWeekBtn").addEventListener("click", () => shiftWeek(-7));
+  document.querySelector("#nextWeekBtn").addEventListener("click", () => shiftWeek(7));
 
   document.querySelector("#addRoleBtn").addEventListener("click", () => {
     state.roles.push({ roles: ["", ""], goals: ["", "", ""], color: roleColors[state.roles.length % roleColors.length] });
     renderRoles();
+    renderRoleSettings();
     saveState();
   });
 
   document.querySelector("#newWeekBtn").addEventListener("click", () => {
-    const start = new Date(`${state.weekStart}T00:00:00`);
-    start.setDate(start.getDate() + 7);
-    const next = createEmptyWeek(start);
-    next.roles = structuredClone(state.roles);
-    next.settings = structuredClone(state.settings);
-    state = next;
-    renderAll();
-    saveState(true);
+    shiftWeek(7);
   });
 
   document.querySelector("#saveBtn").addEventListener("click", () => saveState(true));
@@ -915,7 +1408,8 @@ function bindActions() {
     await requestNotificationPermission();
     notify("提醒測試成功。");
   });
-  document.querySelector("#aiFeedbackBtn").addEventListener("click", generateFeedback);
+  bindVictoryActions();
+  bindLookbackActions();
   document.querySelector("#scheduleForm").addEventListener("submit", (event) => {
     event.preventDefault();
     saveScheduleEvent();
@@ -934,6 +1428,25 @@ function bindActions() {
     const value = normalizeHexColor(event.target.value, "");
     if (value) document.querySelector("#roleColorPicker").value = value;
   });
+}
+
+function shiftWeek(days) {
+  const start = new Date(`${state.weekStart}T00:00:00`);
+  start.setDate(start.getDate() + days);
+  switchWeek(toDateInputValue(start));
+}
+
+function switchWeek(weekStart) {
+  persistStateLocally();
+  const carry = {
+    roles: state.roles,
+    settings: state.settings
+  };
+  state = loadWeekState(weekStart, carry);
+  selectedVictoryDate = weekStart;
+  selectedLookbackDate = weekStart;
+  renderAll();
+  saveState(true);
 }
 
 function registerPwa() {
@@ -957,10 +1470,13 @@ function renderAll() {
   document.querySelector("#weekStart").value = state.weekStart;
   renderWeekHeaders();
   renderRoles();
+  renderRoleSettings();
+  renderVictories();
+  renderWeeklyReflection();
+  renderLookback();
   renderImportantInputs();
   renderSchedule();
   renderRenewal();
-  renderEmotions();
   syncSettingsControls();
   updateStats();
   scheduleReminder();

@@ -1,6 +1,6 @@
 # 以終為始週計畫表
 
-這是一個依照原 Excel「以終為始週計畫表 & 10 大正向情緒」整理出的網頁原型。
+這是一個依照原 Excel「以終為始週計畫表」整理出的網頁原型。
 
 ## 目前狀態
 
@@ -23,8 +23,10 @@
   - 結束時間
   - 所屬角色組
 - 角色組背景色可用十六進位色碼設定
-- 10 大正向情緒記錄
-- 本週統計與 AI 回饋草稿
+- 三個勝利
+- 週反思
+- 回顧本
+- 本週統計
 - 瀏覽器通知測試介面
 - Supabase Auth Magic Link 登入
 - Supabase `weekly_plans` JSON 同步
@@ -81,7 +83,8 @@ http://localhost:8000
 - `goals`
 - `important_items`
 - `calendar_events`
-- `emotion_logs`
+- `daily_wins`
+- `weekly_reflections`
 - `notification_settings`
 
 ## 新對話接續方式

@@ -17,10 +17,12 @@
         <h1>以終為始週計畫表</h1>
       </div>
       <div class="header-actions">
+        <button id="prevWeekBtn" type="button" class="ghost-button week-step-button" aria-label="上一週">‹</button>
         <label class="week-picker">
           <span>週起始日</span>
           <input id="weekStart" type="date">
         </label>
+        <button id="nextWeekBtn" type="button" class="ghost-button week-step-button" aria-label="下一週">›</button>
         <button id="newWeekBtn" type="button" class="ghost-button">新增本週</button>
         <button id="installAppBtn" type="button" class="ghost-button" hidden>安裝</button>
         <button id="saveBtn" type="button" class="primary-button">儲存</button>
@@ -30,8 +32,9 @@
     <main class="app-shell">
       <aside class="side-panel" aria-label="功能導覽">
         <button class="nav-button active" type="button" data-view="planner">週計畫</button>
-        <button class="nav-button" type="button" data-view="emotions">正向情緒</button>
+        <button class="nav-button" type="button" data-view="victories">三個勝利</button>
         <button class="nav-button" type="button" data-view="review">統計回顧</button>
+        <button class="nav-button" type="button" data-view="lookback">回顧本</button>
         <button class="nav-button" type="button" data-view="settings">提醒與 AI</button>
       </aside>
 
@@ -42,7 +45,6 @@
               <p class="eyebrow">Weekly Plan</p>
               <h2 id="plannerTitle">角色、目標與每日行程</h2>
             </div>
-            <button id="addRoleBtn" type="button" class="icon-button" aria-label="新增角色" title="新增角色">+</button>
           </div>
 
           <div class="planner-grid">
@@ -69,14 +71,28 @@
           </section>
         </section>
 
-        <section id="emotions" class="view" aria-labelledby="emotionsTitle">
+        <section id="victories" class="view" aria-labelledby="victoriesTitle">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Positive Emotions</p>
-              <h2 id="emotionsTitle">10 大正向情緒記錄</h2>
+              <p class="eyebrow">Daily Wins</p>
+              <h2 id="victoriesTitle">三個勝利</h2>
+            </div>
+            <div class="victory-date-controls">
+              <button id="prevVictoryDayBtn" type="button" class="ghost-button">前一天</button>
+              <input id="victoryDate" type="date" aria-label="勝利日期">
+              <button id="nextVictoryDayBtn" type="button" class="ghost-button">後一天</button>
             </div>
           </div>
-          <div id="emotionGrid" class="emotion-grid"></div>
+          <div class="victory-layout">
+            <section class="victory-panel">
+              <h3>今天的三個勝利</h3>
+              <div id="todayVictories" class="victory-list"></div>
+            </section>
+            <section class="victory-panel">
+              <h3>明天的三個勝利</h3>
+              <div id="tomorrowVictories" class="victory-list"></div>
+            </section>
+          </div>
         </section>
 
         <section id="review" class="view" aria-labelledby="reviewTitle">
@@ -85,7 +101,6 @@
               <p class="eyebrow">Review</p>
               <h2 id="reviewTitle">本週統計與回顧</h2>
             </div>
-            <button id="aiFeedbackBtn" type="button" class="primary-button">產生 AI 回饋草稿</button>
           </div>
           <div class="stats-grid">
             <article class="stat-block">
@@ -97,24 +112,42 @@
               <strong id="scheduleCount">0</strong>
             </article>
             <article class="stat-block">
-              <span>平均正向情緒</span>
-              <strong id="emotionAverage">0.0</strong>
-            </article>
-            <article class="stat-block">
               <span>更新面向數</span>
               <strong id="renewalCount">0</strong>
             </article>
           </div>
-          <div class="review-layout">
-            <section class="review-panel">
-              <h3>週回顧</h3>
-              <textarea id="weeklyReview" rows="9" placeholder="記錄本週看見的成果、卡住的地方、下週想調整的方向。"></textarea>
-            </section>
-            <section class="review-panel">
-              <h3>AI 回饋草稿</h3>
-              <div id="aiFeedback" class="feedback-box">按下按鈕後，系統會依照目前填寫內容產生一段回顧草稿。正式版可改接 API。</div>
-            </section>
+          <section class="review-panel">
+            <h3>週反思</h3>
+            <div id="weeklyReflectionList" class="reflection-list"></div>
+          </section>
+        </section>
+
+        <section id="lookback" class="view" aria-labelledby="lookbackTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Lookback</p>
+              <h2 id="lookbackTitle">回顧本</h2>
+            </div>
+            <div class="lookback-tabs" role="tablist" aria-label="回顧視角">
+              <button class="lookback-tab active" type="button" data-lookback-mode="daily">每日</button>
+              <button class="lookback-tab" type="button" data-lookback-mode="weekly">每週</button>
+            </div>
           </div>
+
+          <div class="lookback-controls">
+            <button id="prevLookbackDayBtn" type="button" class="ghost-button" aria-label="前一天">‹</button>
+            <label id="lookbackDateControl" class="field-row">
+              <span>回顧日期</span>
+              <input id="lookbackDate" type="date">
+            </label>
+            <button id="nextLookbackDayBtn" type="button" class="ghost-button" aria-label="後一天">›</button>
+            <label id="lookbackRoleControl" class="field-row" hidden>
+              <span>角色篩選</span>
+              <select id="lookbackRole"></select>
+            </label>
+          </div>
+
+          <div id="lookbackContent" class="lookback-content"></div>
         </section>
 
         <section id="settings" class="view" aria-labelledby="settingsTitle">
@@ -125,6 +158,13 @@
             </div>
           </div>
           <div class="settings-grid">
+            <section class="settings-panel wide-panel">
+              <div class="settings-panel-header">
+                <h3>角色設定</h3>
+                <button id="addRoleBtn" type="button" class="ghost-button">新增角色</button>
+              </div>
+              <div id="roleSettingsList" class="role-settings-list"></div>
+            </section>
             <section class="settings-panel">
               <h3>填寫提醒</h3>
               <label class="field-row">
@@ -137,21 +177,6 @@
               </label>
               <button id="testReminderBtn" type="button" class="ghost-button">測試提醒</button>
               <p class="note">第一版提醒會使用瀏覽器通知；若要在網頁關閉後仍推播，下一版需要 PWA 或後端排程。</p>
-            </section>
-            <section class="settings-panel">
-              <h3>AI 回饋 API</h3>
-              <label class="field-row">
-                <span>API 模式</span>
-                <select id="aiMode">
-                  <option value="local">先用本機規則產生草稿</option>
-                  <option value="api">未來接 OpenAI API</option>
-                </select>
-              </label>
-              <label class="field-row">
-                <span>API Key</span>
-                <input id="apiKey" type="password" placeholder="正式版建議放在後端，不放前端">
-              </label>
-              <p class="note">AI 回饋若接 API，建議由後端呼叫，避免金鑰暴露在使用者瀏覽器。</p>
             </section>
             <section class="settings-panel wide-panel">
               <h3>Supabase 同步</h3>
