@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2d6a5f">
+    <title>以終為始週計畫表</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Begin With The End In Mind</p>
+        <h1>以終為始週計畫表</h1>
+      </div>
+      <div class="header-actions">
+        <label class="week-picker">
+          <span>週起始日</span>
+          <input id="weekStart" type="date">
+        </label>
+        <button id="newWeekBtn" type="button" class="ghost-button">新增本週</button>
+        <button id="installAppBtn" type="button" class="ghost-button" hidden>安裝</button>
+        <button id="saveBtn" type="button" class="primary-button">儲存</button>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="side-panel" aria-label="功能導覽">
+        <button class="nav-button active" type="button" data-view="planner">週計畫</button>
+        <button class="nav-button" type="button" data-view="emotions">正向情緒</button>
+        <button class="nav-button" type="button" data-view="review">統計回顧</button>
+        <button class="nav-button" type="button" data-view="settings">提醒與 AI</button>
+      </aside>
+
+      <section class="workspace">
+        <section id="planner" class="view active" aria-labelledby="plannerTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Weekly Plan</p>
+              <h2 id="plannerTitle">角色、目標與每日行程</h2>
+            </div>
+            <button id="addRoleBtn" type="button" class="icon-button" aria-label="新增角色" title="新增角色">+</button>
+          </div>
+
+          <div class="planner-grid">
+            <section class="roles-panel" aria-label="角色與目標">
+              <div class="table-title">角色組與目標</div>
+              <div id="rolesList" class="roles-list"></div>
+            </section>
+
+            <section class="week-panel" aria-label="本週每日規劃">
+              <div id="dayHeaders" class="day-headers"></div>
+              <div class="important-row">
+                <div class="row-label">今日要事</div>
+                <div id="importantInputs" class="day-inputs"></div>
+              </div>
+              <div class="schedule-wrap">
+                <div id="scheduleGrid" class="schedule-grid"></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="renewal-panel" aria-label="精益求精">
+            <div class="table-title">精益求精</div>
+            <div id="renewalGrid" class="renewal-grid"></div>
+          </section>
+        </section>
+
+        <section id="emotions" class="view" aria-labelledby="emotionsTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Positive Emotions</p>
+              <h2 id="emotionsTitle">10 大正向情緒記錄</h2>
+            </div>
+          </div>
+          <div id="emotionGrid" class="emotion-grid"></div>
+        </section>
+
+        <section id="review" class="view" aria-labelledby="reviewTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Review</p>
+              <h2 id="reviewTitle">本週統計與回顧</h2>
+            </div>
+            <button id="aiFeedbackBtn" type="button" class="primary-button">產生 AI 回饋草稿</button>
+          </div>
+          <div class="stats-grid">
+            <article class="stat-block">
+              <span>今日要事填寫率</span>
+              <strong id="importantRate">0%</strong>
+            </article>
+            <article class="stat-block">
+              <span>行程格填寫數</span>
+              <strong id="scheduleCount">0</strong>
+            </article>
+            <article class="stat-block">
+              <span>平均正向情緒</span>
+              <strong id="emotionAverage">0.0</strong>
+            </article>
+            <article class="stat-block">
+              <span>更新面向數</span>
+              <strong id="renewalCount">0</strong>
+            </article>
+          </div>
+          <div class="review-layout">
+            <section class="review-panel">
+              <h3>週回顧</h3>
+              <textarea id="weeklyReview" rows="9" placeholder="記錄本週看見的成果、卡住的地方、下週想調整的方向。"></textarea>
+            </section>
+            <section class="review-panel">
+              <h3>AI 回饋草稿</h3>
+              <div id="aiFeedback" class="feedback-box">按下按鈕後，系統會依照目前填寫內容產生一段回顧草稿。正式版可改接 API。</div>
+            </section>
+          </div>
+        </section>
+
+        <section id="settings" class="view" aria-labelledby="settingsTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Settings</p>
+              <h2 id="settingsTitle">提醒與 AI 設定</h2>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <section class="settings-panel">
+              <h3>填寫提醒</h3>
+              <label class="field-row">
+                <span>每日提醒時間</span>
+                <input id="reminderTime" type="time">
+              </label>
+              <label class="check-row">
+                <input id="reminderEnabled" type="checkbox">
+                <span>在網頁開啟時啟用瀏覽器提醒</span>
+              </label>
+              <button id="testReminderBtn" type="button" class="ghost-button">測試提醒</button>
+              <p class="note">第一版提醒會使用瀏覽器通知；若要在網頁關閉後仍推播，下一版需要 PWA 或後端排程。</p>
+            </section>
+            <section class="settings-panel">
+              <h3>AI 回饋 API</h3>
+              <label class="field-row">
+                <span>API 模式</span>
+                <select id="aiMode">
+                  <option value="local">先用本機規則產生草稿</option>
+                  <option value="api">未來接 OpenAI API</option>
+                </select>
+              </label>
+              <label class="field-row">
+                <span>API Key</span>
+                <input id="apiKey" type="password" placeholder="正式版建議放在後端，不放前端">
+              </label>
+              <p class="note">AI 回饋若接 API，建議由後端呼叫，避免金鑰暴露在使用者瀏覽器。</p>
+            </section>
+            <section class="settings-panel wide-panel">
+              <h3>Supabase 同步</h3>
+              <div class="supabase-status" id="supabaseStatus">尚未連線；目前資料只存在此瀏覽器。</div>
+              <div class="settings-form-grid">
+                <label class="field-row">
+                  <span>Project URL</span>
+                  <input id="supabaseUrl" type="url" placeholder="https://xxxxx.supabase.co" autocomplete="off">
+                </label>
+                <label class="field-row">
+                  <span>Anon public key</span>
+                  <input id="supabaseAnonKey" type="password" placeholder="Supabase anon key" autocomplete="off">
+                </label>
+                <label class="field-row">
+                  <span>登入 Email</span>
+                  <input id="supabaseEmail" type="email" placeholder="you@example.com" autocomplete="email">
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="saveSupabaseBtn" type="button" class="ghost-button">儲存設定</button>
+                <button id="sendMagicLinkBtn" type="button" class="primary-button">寄送登入連結</button>
+                <button id="syncFromCloudBtn" type="button" class="ghost-button">從雲端載入</button>
+                <button id="signOutBtn" type="button" class="ghost-button">登出</button>
+              </div>
+              <p class="note">Anon key 是 Supabase 前端公開金鑰；安全性主要靠 Auth 與 Row Level Security。請先在 Supabase 執行 repo 內的 `supabase-schema.sql`。</p>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="scheduleDialog" class="schedule-dialog">
+      <form id="scheduleForm" method="dialog">
+        <input id="scheduleEventId" type="hidden">
+        <header>
+          <h3>編輯行程</h3>
+          <button id="cancelScheduleBtn" type="button" class="plain-icon" aria-label="關閉">×</button>
+        </header>
+        <label class="field-row">
+          <span>行程名稱</span>
+          <input id="scheduleTitle" type="text" placeholder="輸入行程">
+        </label>
+        <div class="schedule-form-grid">
+          <label class="field-row">
+            <span>日期</span>
+            <select id="scheduleDay">
+              <option value="0">週日</option>
+              <option value="1">週一</option>
+              <option value="2">週二</option>
+              <option value="3">週三</option>
+              <option value="4">週四</option>
+              <option value="5">週五</option>
+              <option value="6">週六</option>
+            </select>
+          </label>
+          <label class="field-row">
+            <span>角色組</span>
+            <select id="scheduleRole"></select>
+          </label>
+          <label class="field-row">
+            <span>開始</span>
+            <input id="scheduleStart" type="time" step="300">
+          </label>
+          <label class="field-row">
+            <span>結束</span>
+            <input id="scheduleEnd" type="time" step="300">
+          </label>
+        </div>
+        <footer>
+          <button id="deleteScheduleBtn" type="button" class="danger-button">刪除</button>
+          <button type="submit" class="primary-button">套用</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="roleColorDialog" class="schedule-dialog">
+      <form id="roleColorForm" method="dialog">
+        <input id="roleColorIndex" type="hidden">
+        <header>
+          <h3>角色背景色</h3>
+          <button id="cancelRoleColorBtn" type="button" class="plain-icon" aria-label="關閉">×</button>
+        </header>
+        <label class="field-row">
+          <span>十六進位色碼</span>
+          <input id="roleColorText" type="text" placeholder="#800000" maxlength="7">
+        </label>
+        <label class="field-row">
+          <span>色彩選擇</span>
+          <input id="roleColorPicker" type="color">
+        </label>
+        <footer>
+          <button type="submit" class="primary-button">套用</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

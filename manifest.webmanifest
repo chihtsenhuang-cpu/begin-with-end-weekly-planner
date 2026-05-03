@@ -1,0 +1,19 @@
+{
+  "name": "以終為始週計畫表",
+  "short_name": "週計畫",
+  "description": "角色、目標、行程與正向情緒的每週計畫 PWA。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#2d6a5f",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
