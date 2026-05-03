@@ -744,6 +744,76 @@ button {
   margin: 0;
 }
 
+.lookback-victory-wide {
+  grid-column: 1 / -1;
+}
+
+.lookback-victory-list {
+  display: grid;
+  gap: 10px;
+}
+
+.weekly-victory-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lookback-victory-card {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfa;
+  overflow: hidden;
+}
+
+.lookback-victory-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lookback-victory-summary::-webkit-details-marker {
+  display: none;
+}
+
+.lookback-victory-title {
+  color: var(--accent-strong);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.lookback-victory-count {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.lookback-victory-arrow {
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+  transition: transform 0.18s ease;
+}
+
+.lookback-victory-card[open] .lookback-victory-arrow {
+  transform: rotate(90deg);
+}
+
+.lookback-victory-content {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.lookback-victory-content .empty-state {
+  margin: 0;
+}
+
 .todo-list {
   display: grid;
   gap: 8px;
@@ -887,6 +957,7 @@ button {
   .settings-form-grid,
   .settings-grid,
   .lookback-content,
+  .weekly-victory-list,
   .stats-grid,
   .victory-layout {
     grid-template-columns: 1fr;

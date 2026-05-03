@@ -1123,8 +1123,90 @@ function getVictoryItemsForDate(dateValue) {
   ].filter((item) => isFilled(item.text) || isFilled(item.note));
 }
 
-function getWeeklyVictoryItems() {
-  return getWeekDates().flatMap((date) => getVictoryItemsForDate(date).map((item) => ({ ...item, date })));
+function createVictoryCard(title, items, emptyText) {
+  const card = document.createElement("details");
+  card.className = "lookback-victory-card";
+
+  const summary = document.createElement("summary");
+  summary.className = "lookback-victory-summary";
+  const summaryText = document.createElement("span");
+  summaryText.className = "lookback-victory-title";
+  summaryText.textContent = title;
+  const count = document.createElement("span");
+  count.className = "lookback-victory-count";
+  count.textContent = `${items.length} 筆`;
+  const arrow = document.createElement("span");
+  arrow.className = "lookback-victory-arrow";
+  arrow.textContent = "›";
+  summary.append(summaryText, count, arrow);
+
+  const content = document.createElement("div");
+  content.className = "lookback-victory-content";
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = emptyText;
+    content.append(empty);
+  } else {
+    items.forEach((item) => {
+      const row = document.createElement("article");
+      row.className = "lookback-item";
+      const titleEl = document.createElement("strong");
+      titleEl.textContent = `${item.label}${item.roleIndex !== "" && item.roleIndex !== undefined ? `｜${getRoleGroupName(item.roleIndex)}` : ""}`;
+      row.append(titleEl);
+      const bodyText = [item.text, item.note].filter(isFilled).join("｜");
+      if (bodyText) {
+        const body = document.createElement("p");
+        body.textContent = bodyText;
+        row.append(body);
+      }
+      content.append(row);
+    });
+  }
+
+  card.append(summary, content);
+  return card;
+}
+
+function createDailyVictoryBlock(dateValue) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = "三個勝利";
+  const list = document.createElement("div");
+  list.className = "lookback-victory-list";
+  const day = state.dailyWins[dateValue] || createEmptyVictoryDay();
+
+  const todayItems = day.today
+    .map((item, index) => ({ ...item, label: `今天 ${index + 1}` }))
+    .filter((item) => isFilled(item.text) || isFilled(item.note));
+  const tomorrowItems = day.tomorrow
+    .map((item, index) => ({ ...item, label: `明天 ${index + 1}` }))
+    .filter((item) => isFilled(item.text) || isFilled(item.note));
+
+  list.append(
+    createVictoryCard("今天的三個勝利", todayItems, "今天還沒有勝利紀錄。"),
+    createVictoryCard("明天的三個勝利", tomorrowItems, "明天還沒有勝利紀錄。")
+  );
+  block.append(heading, list);
+  return block;
+}
+
+function createWeeklyVictoryBlock(title, isAllRoles, roleIndex) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel lookback-victory-wide";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("div");
+  list.className = "lookback-victory-list weekly-victory-list";
+
+  getWeekDates().forEach((date, dayIndex) => {
+    const items = getVictoryItemsForDate(date).filter((item) => isAllRoles || item.roleIndex === roleIndex);
+    list.append(createVictoryCard(`${dayNames[dayIndex]} ${date}`, items, "這天還沒有勝利紀錄。"));
+  });
+
+  block.append(heading, list);
+  return block;
 }
 
 function formatScheduleItem(event) {
@@ -1141,16 +1223,12 @@ function renderDailyLookback(container) {
   const schedules = offset >= 0 && offset < 7
     ? state.schedule.filter((event) => event.dayIndex === offset).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))
     : [];
-  const wins = getVictoryItemsForDate(selectedLookbackDate).map((item) => ({
-    title: `${item.label}${item.roleIndex !== "" && item.roleIndex !== undefined ? `｜${getRoleGroupName(item.roleIndex)}` : ""}`,
-    body: [item.text, item.note].filter(isFilled).join("｜")
-  }));
 
   container.append(
     createHeadlineBlock(dateTitle, "這一天的要事、行程與三個勝利。"),
     createDailyTodoBlock("今日要事", important || [], offset),
     createRichBlock("當日行程", schedules.map(formatScheduleItem)),
-    createRichBlock("三個勝利", wins)
+    createDailyVictoryBlock(selectedLookbackDate)
   );
 }
 
@@ -1168,12 +1246,6 @@ function renderWeeklyLookback(container) {
         done: item.done
       }))
   ));
-  const victoryItems = getWeeklyVictoryItems()
-    .filter((item) => isAllRoles || item.roleIndex === roleIndex)
-    .map((item) => ({
-      title: `${item.date}｜${item.label}${item.roleIndex !== "" && item.roleIndex !== undefined ? `｜${getRoleGroupName(item.roleIndex)}` : ""}`,
-      body: [item.text, item.note].filter(isFilled).join("｜")
-    }));
   const reflectionItems = weeklyReviewQuestions.map((question, index) => ({
     title: question,
     body: state.weeklyReviewAnswers[index] || ""
@@ -1182,7 +1254,7 @@ function renderWeeklyLookback(container) {
   container.append(
     createRichBlock("本週目標", roleItems),
     createWeeklyTodoBlock("每週要事", importantItems),
-    createRichBlock("三個勝利", victoryItems),
+    createWeeklyVictoryBlock("三個勝利", isAllRoles, roleIndex),
     createRichBlock("週反思", reflectionItems)
   );
 }
@@ -1451,7 +1523,10 @@ function switchWeek(weekStart) {
 
 function registerPwa() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    navigator.serviceWorker
+      .register("service-worker.js", { updateViaCache: "none" })
+      .then((registration) => registration.update())
+      .catch(() => {});
   }
 
   window.addEventListener("beforeinstallprompt", (event) => {
