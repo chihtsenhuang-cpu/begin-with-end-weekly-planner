@@ -24,12 +24,12 @@ const scheduleEndHour = 23;
 const hourHeightPx = 72;
 const timeSnapMinutes = 5;
 const defaultRoles = [
-  { roles: ["個人發展", "身心健全"], goals: ["", "", ""], color: roleColors[0] },
-  { roles: ["基督徒", "神忠實的管家"], goals: ["", "", ""], color: roleColors[1] },
-  { roles: ["財務教練", "受人信任，帶人覺察"], goals: ["", "", ""], color: roleColors[2] },
-  { roles: ["企業家", "打造 AI 賦能高效團隊"], goals: ["", "", ""], color: roleColors[3] },
-  { roles: ["家人", "氣氛和睦感情深厚"], goals: ["", "", ""], color: roleColors[4] },
-  { roles: ["內容創作者", "打造有影響力品牌"], goals: ["", "", ""], color: roleColors[5] }
+  { roles: ["個人發展", "身心健全"], goals: ["", "", ""], goalDone: [false, false, false], color: roleColors[0] },
+  { roles: ["基督徒", "神忠實的管家"], goals: ["", "", ""], goalDone: [false, false, false], color: roleColors[1] },
+  { roles: ["財務教練", "受人信任，帶人覺察"], goals: ["", "", ""], goalDone: [false, false, false], color: roleColors[2] },
+  { roles: ["企業家", "打造 AI 賦能高效團隊"], goals: ["", "", ""], goalDone: [false, false, false], color: roleColors[3] },
+  { roles: ["家人", "氣氛和睦感情深厚"], goals: ["", "", ""], goalDone: [false, false, false], color: roleColors[4] },
+  { roles: ["內容創作者", "打造有影響力品牌"], goals: ["", "", ""], goalDone: [false, false, false], color: roleColors[5] }
 ];
 
 const storageKey = "begin-with-end-week-plan";
@@ -98,7 +98,11 @@ function normalizeGoals(item) {
     "每日行程",
     "個人成長"
   ]);
-  const clean = (values) => values.filter((value) => value && !roleLabels.has(value));
+  const toGoalText = (value) => {
+    if (value && typeof value === "object") return value.text || value.goal || "";
+    return value || "";
+  };
+  const clean = (values) => values.map(toGoalText).filter((value) => value && !roleLabels.has(value));
   if (Array.isArray(item.goals)) {
     return [...clean(item.goals), ...Array(goalSlots).fill("")].slice(0, goalSlots);
   }
@@ -106,6 +110,14 @@ function normalizeGoals(item) {
     return [...clean([item.goal]), ...Array(goalSlots).fill("")].slice(0, goalSlots);
   }
   return Array(goalSlots).fill("");
+}
+
+function normalizeGoalDone(item, goals) {
+  const objectDone = Array.isArray(item.goals)
+    ? item.goals.map((goal) => Boolean(goal && typeof goal === "object" && goal.done))
+    : [];
+  const source = Array.isArray(item.goalDone) ? item.goalDone : objectDone;
+  return Array.from({ length: goalSlots }, (_, index) => Boolean(source[index]) && isFilled(goals[index]));
 }
 
 function normalizeRoleLabels(item) {
@@ -131,7 +143,12 @@ function migrateLegacyRoles(roles) {
     return source.map((item, index) => {
       const roleLabels = normalizeRoleLabels(item);
       const goals = normalizeGoals(item);
-      return { roles: roleLabels, goals, color: normalizeHexColor(item.color, roleColors[index % roleColors.length]) };
+      return {
+        roles: roleLabels,
+        goals,
+        goalDone: normalizeGoalDone(item, goals),
+        color: normalizeHexColor(item.color, roleColors[index % roleColors.length])
+      };
     });
   }
 
@@ -155,10 +172,21 @@ function migrateLegacyRoles(roles) {
       ));
       if (secondIndex !== -1) consumed.add(secondIndex);
       const goals = normalizeGoals(item);
-      migrated.push({ roles: [firstRole, expectedSecond], goals, color: roleColors[migrated.length % roleColors.length] });
+      migrated.push({
+        roles: [firstRole, expectedSecond],
+        goals,
+        goalDone: normalizeGoalDone(item, goals),
+        color: roleColors[migrated.length % roleColors.length]
+      });
       return;
     }
-    migrated.push({ roles: normalizeRoleLabels(item), goals: normalizeGoals(item), color: roleColors[migrated.length % roleColors.length] });
+    const goals = normalizeGoals(item);
+    migrated.push({
+      roles: normalizeRoleLabels(item),
+      goals,
+      goalDone: normalizeGoalDone(item, goals),
+      color: roleColors[migrated.length % roleColors.length]
+    });
   });
 
   return migrated.length ? migrated : structuredClone(defaultRoles);
@@ -311,6 +339,7 @@ function loadWeekState(weekStart, carry = {}) {
   next.roles = carriedRoles.map((role, index) => ({
     roles: [...(role.roles || []), ...Array(roleSlots).fill("")].slice(0, roleSlots),
     goals: Array(goalSlots).fill(""),
+    goalDone: Array(goalSlots).fill(false),
     color: normalizeHexColor(role.color, roleColors[index % roleColors.length])
   }));
   next.settings = structuredClone(carry.settings || state?.settings || createEmptyWeek().settings);
@@ -1088,6 +1117,41 @@ function createDailyTodoBlock(title, items, dayIndex) {
   return block;
 }
 
+function createWeeklyGoalTodoBlock(title, items) {
+  const block = document.createElement("section");
+  block.className = "lookback-panel";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("div");
+  list.className = "todo-list";
+
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "目前還沒有內容。";
+    list.append(empty);
+  } else {
+    items.forEach((item) => {
+      const label = document.createElement("label");
+      label.className = "todo-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = item.done;
+      const text = document.createElement("span");
+      text.textContent = item.text;
+      checkbox.addEventListener("change", () => {
+        state.roles[item.roleIndex].goalDone[item.goalIndex] = checkbox.checked;
+        saveState();
+      });
+      label.append(checkbox, text);
+      list.append(label);
+    });
+  }
+
+  block.append(heading, list);
+  return block;
+}
+
 function createWeeklyTodoBlock(title, items) {
   const block = document.createElement("section");
   block.className = "lookback-panel";
@@ -1236,8 +1300,18 @@ function renderWeeklyLookback(container) {
   const isAllRoles = selectedLookbackRoleIndex === "all";
   const roleIndex = isAllRoles ? null : Math.min(Number(selectedLookbackRoleIndex) || 0, Math.max(state.roles.length - 1, 0));
   const roleItems = isAllRoles
-    ? state.roles.flatMap((role) => role.goals.filter(isFilled).map((goal) => ({ title: goal })))
-    : (state.roles[roleIndex]?.goals || []).filter(isFilled).map((goal) => ({ title: goal }));
+    ? state.roles.flatMap((role, currentRoleIndex) => role.goals.map((goal, goalIndex) => ({
+      text: goal,
+      done: Boolean(role.goalDone?.[goalIndex]),
+      roleIndex: currentRoleIndex,
+      goalIndex
+    })).filter((goal) => isFilled(goal.text)))
+    : (state.roles[roleIndex]?.goals || []).map((goal, goalIndex) => ({
+      text: goal,
+      done: Boolean(state.roles[roleIndex]?.goalDone?.[goalIndex]),
+      roleIndex,
+      goalIndex
+    })).filter((goal) => isFilled(goal.text));
   const importantItems = getWeekDates().flatMap((date, dayIndex) => (
     state.important[dayIndex]
       .filter((item) => isFilled(item.text))
@@ -1252,7 +1326,7 @@ function renderWeeklyLookback(container) {
   })).filter((item) => isFilled(item.body));
 
   container.append(
-    createRichBlock("本週目標", roleItems),
+    createWeeklyGoalTodoBlock("本週目標", roleItems),
     createWeeklyTodoBlock("每週要事", importantItems),
     createWeeklyVictoryBlock("三個勝利", isAllRoles, roleIndex),
     createRichBlock("週反思", reflectionItems)
@@ -1458,7 +1532,12 @@ function bindActions() {
   document.querySelector("#nextWeekBtn").addEventListener("click", () => shiftWeek(7));
 
   document.querySelector("#addRoleBtn").addEventListener("click", () => {
-    state.roles.push({ roles: ["", ""], goals: ["", "", ""], color: roleColors[state.roles.length % roleColors.length] });
+    state.roles.push({
+      roles: ["", ""],
+      goals: ["", "", ""],
+      goalDone: [false, false, false],
+      color: roleColors[state.roles.length % roleColors.length]
+    });
     renderRoles();
     renderRoleSettings();
     saveState();
