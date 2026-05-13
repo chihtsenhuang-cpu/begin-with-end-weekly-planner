@@ -32,6 +32,7 @@
     <main class="app-shell">
       <aside class="side-panel" aria-label="功能導覽">
         <button class="nav-button active" type="button" data-view="planner">週計畫</button>
+        <button class="nav-button" type="button" data-view="reminders">提醒</button>
         <button class="nav-button" type="button" data-view="crm">CRM 拜訪</button>
         <button class="nav-button" type="button" data-view="funnel">業務漏斗</button>
         <button class="nav-button" type="button" data-view="victories">三個勝利</button>
@@ -71,6 +72,17 @@
             <div class="table-title">精益求精</div>
             <div id="renewalGrid" class="renewal-grid"></div>
           </section>
+        </section>
+
+        <section id="reminders" class="view" aria-labelledby="remindersTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Reminders</p>
+              <h2 id="remindersTitle">提醒</h2>
+            </div>
+            <button id="refreshRemindersBtn" type="button" class="ghost-button">重新整理</button>
+          </div>
+          <div id="remindersContent" class="reminders-content"></div>
         </section>
 
         <section id="crm" class="view" aria-labelledby="crmTitle">
@@ -488,5 +500,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
+    <script src="ai-assistant.js"></script>
   </body>
 </html>

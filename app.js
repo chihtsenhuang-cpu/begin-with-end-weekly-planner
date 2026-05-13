@@ -491,6 +491,7 @@ function normalizeCrmVisit(visit) {
     nextFollowUpDate: visit?.nextFollowUpDate || "",
     pretaxIncome: visit?.pretaxIncome || "",
     stageAfter: crmStages.includes(stageAfter) ? stageAfter : "",
+    handled: visit?.handled === true,
     createdAt: visit?.createdAt || new Date().toISOString()
   };
 }
@@ -993,6 +994,7 @@ function mapCrmVisitToCloud(visit) {
     next_follow_up_date: visit.nextFollowUpDate || null,
     pretax_income: visit.pretaxIncome || null,
     stage_after: visit.stageAfter || null,
+    handled: visit.handled === true,
     created_at: visit.createdAt,
     updated_at: new Date().toISOString()
   };
@@ -1121,6 +1123,7 @@ function cloudVisitToLocal(row) {
     nextFollowUpDate: row.next_follow_up_date || "",
     pretaxIncome: row.pretax_income || "",
     stageAfter: row.stage_after || "",
+    handled: row.handled === true,
     createdAt: row.created_at || new Date().toISOString()
   });
 }
@@ -1243,6 +1246,7 @@ function bindNavigation() {
       if (button.dataset.view === "lookback") renderLookback();
       if (button.dataset.view === "crm") renderCrm();
       if (button.dataset.view === "funnel") renderFunnel();
+      if (button.dataset.view === "reminders" && typeof renderReminders === "function") renderReminders();
     });
   });
 }
@@ -1882,9 +1886,29 @@ function renderCrmVisitTimeline(account) {
       line.textContent = `${label}：${value}`;
       item.append(line);
     });
+    if (visit.stageAfter === "保服" || visit.stageAfter === "理賠") {
+      const handledRow = document.createElement("label");
+      handledRow.className = "visit-handled-row";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = visit.handled === true;
+      checkbox.addEventListener("change", () => toggleCrmVisitHandled(visit.id, checkbox.checked));
+      const span = document.createElement("span");
+      span.textContent = `已處理完此${visit.stageAfter}`;
+      handledRow.append(checkbox, span);
+      item.append(handledRow);
+    }
     timeline.append(item);
   });
   return timeline;
+}
+
+function toggleCrmVisitHandled(visitId, handled) {
+  const visit = crmState.visits.find((v) => v.id === visitId);
+  if (!visit) return;
+  visit.handled = handled === true;
+  saveCrmState();
+  if (typeof renderReminders === "function") renderReminders();
 }
 
 function renderCrmVisitForm(account, editingVisitId = "") {
