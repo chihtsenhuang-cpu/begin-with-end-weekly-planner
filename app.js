@@ -38,6 +38,8 @@ const supabaseSettingsKey = "begin-with-end-supabase-settings";
 const crmStorageKey = "begin-with-end-crm-workbench";
 const crmStages = ["尚未聯絡", "初步聯繫", "財務＆保單分析", "說明與口頭", "建議書", "成交", "轉介紹", "保服", "理賠", "暫緩"];
 const crmFunnelStages = ["尚未聯絡", "初步聯繫", "財務＆保單分析", "說明與口頭", "建議書", "成交"];
+const crmFunnelExtraStages = ["轉介紹"];
+const crmFunnelAllStages = [...crmFunnelStages, ...crmFunnelExtraStages];
 const crmMethods = ["電話", "LINE", "面訪", "視訊", "Email", "其他"];
 const crmLegacyStageHeaders = ["尚未聯絡", "初步聯繫", "財務 (保單) 分析", "說明＆口頭", "建議書", "成交", "轉介紹", "轉介紹成交", "保服", "理賠"];
 const crmLegacyColumns = {
@@ -65,7 +67,7 @@ let selectedCrmStageFilter = "all";
 let expandedCrmLocations = new Set();
 let selectedFunnelYear = new Date().getFullYear();
 let selectedFunnelHalf = new Date().getMonth() < 6 ? "H1" : "H2";
-let selectedFunnelStage = "all";
+let selectedFunnelStage = "初步聯繫";
 let reminderTimer = null;
 let deferredInstallPrompt = null;
 let supabaseClient = null;
@@ -624,10 +626,10 @@ function getLegacyFunnelStages(account) {
   const stages = crmLegacyStageHeaders
     .filter((stage) => isLegacyChecked(account.sourceRaw?.[stage]))
     .map(normalizeLegacyStage)
-    .filter((stage) => crmFunnelStages.includes(stage));
+    .filter((stage) => crmFunnelAllStages.includes(stage));
   const unique = [...new Set(stages)];
   if (unique.length) return unique;
-  return crmFunnelStages.includes(account.stage) ? [account.stage] : [];
+  return crmFunnelAllStages.includes(account.stage) ? [account.stage] : [];
 }
 
 function getFunnelEvents() {
@@ -635,7 +637,7 @@ function getFunnelEvents() {
   const accountsWithVisits = new Set();
   crmState.visits.forEach((visit) => {
     accountsWithVisits.add(visit.accountId);
-    if (!crmFunnelStages.includes(visit.stageAfter) || !isDateInFunnelRange(visit.date)) return;
+    if (!crmFunnelAllStages.includes(visit.stageAfter) || !isDateInFunnelRange(visit.date)) return;
     const account = getCrmAccount(visit.accountId);
     if (!account) return;
     events.push({
@@ -666,7 +668,7 @@ function getFunnelEvents() {
 
   return events.sort((a, b) => (
     b.date.localeCompare(a.date) ||
-    crmFunnelStages.indexOf(a.stage) - crmFunnelStages.indexOf(b.stage) ||
+    crmFunnelAllStages.indexOf(a.stage) - crmFunnelAllStages.indexOf(b.stage) ||
     a.account.name.localeCompare(b.account.name, "zh-Hant", { numeric: true, sensitivity: "base" })
   ));
 }
@@ -674,7 +676,7 @@ function getFunnelEvents() {
 function getFunnelSummary() {
   const events = getFunnelEvents();
   const accounts = [...new Map(events.map((event) => [event.account.id, event.account])).values()];
-  const byStage = Object.fromEntries(crmFunnelStages.map((stage) => [stage, []]));
+  const byStage = Object.fromEntries(crmFunnelAllStages.map((stage) => [stage, []]));
   events.forEach((event) => {
     byStage[event.stage].push(event);
   });
@@ -2072,39 +2074,56 @@ function renderFunnel() {
   document.querySelector("#funnelYear").value = selectedFunnelYear;
   document.querySelector("#funnelHalf").value = selectedFunnelHalf;
 
-  const { events, byStage } = getFunnelSummary();
-  const total = events.length;
-  const closed = byStage["成交"]?.length || 0;
+  const { byStage } = getFunnelSummary();
   const contacted = byStage["初步聯繫"]?.length || 0;
-  const largest = crmFunnelStages
-    .map((stage) => ({ stage, count: byStage[stage]?.length || 0 }))
-    .filter((item) => item.stage !== "成交")
-    .sort((a, b) => b.count - a.count)[0];
 
-  document.querySelector("#funnelTotalCount").textContent = String(total);
-  document.querySelector("#funnelClosedCount").textContent = String(closed);
-  document.querySelector("#funnelCloseRate").textContent = contacted ? formatPercent(closed / contacted) : "0%";
-  document.querySelector("#funnelLargestStage").textContent = largest?.count ? largest.stage : "-";
-
-  const max = Math.max(...crmFunnelStages.map((stage) => byStage[stage]?.length || 0), 1);
+  const totalAccounts = crmState.accounts.length;
+  const max = Math.max(...crmFunnelAllStages
+    .filter((stage) => stage !== "尚未聯絡")
+    .map((stage) => byStage[stage]?.length || 0), 1);
   stageList.innerHTML = "";
-  crmFunnelStages.forEach((stage) => {
-    const count = byStage[stage]?.length || 0;
-    const ratio = total ? count / total : 0;
-
+  crmFunnelAllStages.forEach((stage) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = selectedFunnelStage === stage ? "funnel-stage active" : "funnel-stage";
+
+    if (stage === "尚未聯絡") {
+      button.innerHTML = `
+        <span class="funnel-stage-head">
+          <strong>現有名單</strong>
+          <em>${totalAccounts} 人</em>
+        </span>
+      `;
+      button.addEventListener("click", () => {
+        selectedFunnelStage = stage;
+        renderFunnel();
+      });
+      stageList.append(button);
+      return;
+    }
+
+    const count = byStage[stage]?.length || 0;
+    let metaLabel = "";
+    if (crmFunnelExtraStages.includes(stage)) {
+      metaLabel = "";
+    } else if (stage === "初步聯繫") {
+      const ratio = totalAccounts ? count / totalAccounts : 0;
+      metaLabel = `佔總客戶 ${formatPercent(ratio)}`;
+    } else {
+      const ratio = contacted ? count / contacted : 0;
+      metaLabel = `轉換率 ${formatPercent(ratio)}`;
+    }
+
     button.innerHTML = `
       <span class="funnel-stage-head">
         <strong>${stage}</strong>
         <em>${count} 次</em>
       </span>
       <span class="funnel-bar"><i style="width: ${Math.max((count / max) * 100, count ? 8 : 0)}%"></i></span>
-      <span class="funnel-stage-meta">${getFunnelRange().label}｜實際紀錄 ${formatPercent(ratio)}</span>
+      <span class="funnel-stage-meta">${getFunnelRange().label}${metaLabel ? `｜${metaLabel}` : ""}</span>
     `;
     button.addEventListener("click", () => {
-      selectedFunnelStage = selectedFunnelStage === stage ? "all" : stage;
+      selectedFunnelStage = stage;
       renderFunnel();
     });
     stageList.append(button);
@@ -2117,6 +2136,48 @@ function renderFunnelAccounts(byStage = getFunnelSummary().byStage) {
   const list = document.querySelector("#funnelAccountList");
   if (!list) return;
   const title = document.querySelector("#funnelAccountTitle");
+
+  if (selectedFunnelStage === "尚未聯絡") {
+    title.textContent = "現有名單";
+    list.innerHTML = "";
+    const accounts = crmState.accounts.slice().sort((a, b) =>
+      a.name.localeCompare(b.name, "zh-Hant", { numeric: true })
+    );
+    if (!accounts.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-state crm-empty";
+      empty.textContent = "目前還沒有客戶。";
+      list.append(empty);
+      return;
+    }
+    accounts.forEach((account) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "funnel-account-card";
+      const summary = createCrmMeta(account);
+      card.innerHTML = `
+        <span>
+          <strong></strong>
+          <em>${account.stage || "尚未聯絡"}</em>
+        </span>
+        <p></p>
+        <small>${account.lastContactDate || "尚未聯絡"}</small>
+      `;
+      card.querySelector("strong").textContent = account.name;
+      card.querySelector("p").textContent = summary;
+      card.addEventListener("click", () => {
+        selectedCrmAccountId = account.id;
+        document.querySelectorAll(".nav-button").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
+        document.querySelector('[data-view="crm"]').classList.add("active");
+        document.querySelector("#crm").classList.add("active");
+        renderCrm();
+      });
+      list.append(card);
+    });
+    return;
+  }
+
   const events = selectedFunnelStage === "all"
     ? getFunnelSummary().events
     : (byStage[selectedFunnelStage] || []);
@@ -2135,7 +2196,7 @@ function renderFunnelAccounts(byStage = getFunnelSummary().byStage) {
     .slice()
     .sort((a, b) => (
       b.date.localeCompare(a.date) ||
-      crmFunnelStages.indexOf(a.stage) - crmFunnelStages.indexOf(b.stage) ||
+      crmFunnelAllStages.indexOf(a.stage) - crmFunnelAllStages.indexOf(b.stage) ||
       a.account.name.localeCompare(b.account.name, "zh-Hant", { numeric: true })
     ))
     .forEach((event) => {
@@ -2166,9 +2227,103 @@ function renderFunnelAccounts(byStage = getFunnelSummary().byStage) {
     });
 }
 
+const crmPresetFieldOptions = {
+  category: ["5.旅平險", "7.拒保"],
+  policyStatus: ["2.催告", "7.非儲蓄解約"]
+};
+
+function collectCrmFieldOptions(field) {
+  const values = new Set();
+  (crmPresetFieldOptions[field] || []).forEach((value) => {
+    const trimmed = String(value || "").trim();
+    if (trimmed) values.add(trimmed);
+  });
+  crmState.accounts.forEach((account) => {
+    const value = String(account?.[field] || "").trim();
+    if (value) values.add(value);
+  });
+  return [...values].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+}
+
+function collectCrmProductOptions() {
+  const values = new Set();
+  crmState.accounts.forEach((account) => {
+    const products = Array.isArray(account?.products) && account.products.length
+      ? account.products
+      : splitPolicyProducts(account?.policies || "");
+    products.forEach((product) => {
+      const value = String(product || "").trim();
+      if (value) values.add(value);
+    });
+  });
+  return [...values].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+}
+
+function renderCrmDatalist(id, options) {
+  const datalist = document.querySelector(`#${id}`);
+  if (!datalist) return;
+  datalist.innerHTML = "";
+  options.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    datalist.append(option);
+  });
+}
+
+function renderCrmPoliciesList(selected = []) {
+  const list = document.querySelector("#crmAccountPoliciesList");
+  if (!list) return;
+  const selectedSet = new Set(selected.map((item) => String(item).trim()).filter(Boolean));
+  const allOptions = new Set(collectCrmProductOptions());
+  selectedSet.forEach((value) => allOptions.add(value));
+  const sorted = [...allOptions].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+
+  list.innerHTML = "";
+  if (!sorted.length) {
+    const empty = document.createElement("p");
+    empty.className = "crm-policies-empty";
+    empty.textContent = "尚無險種，請從右側新增。";
+    list.append(empty);
+    return;
+  }
+  sorted.forEach((value) => {
+    const label = document.createElement("label");
+    label.className = "crm-policy-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = value;
+    checkbox.checked = selectedSet.has(value);
+    const text = document.createElement("span");
+    text.textContent = value;
+    label.append(checkbox, text);
+    list.append(label);
+  });
+}
+
+function getSelectedCrmPolicies() {
+  const list = document.querySelector("#crmAccountPoliciesList");
+  if (!list) return [];
+  return [...list.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+}
+
+function addCrmPolicyOption() {
+  const input = document.querySelector("#crmAccountPoliciesNew");
+  if (!input) return;
+  const value = input.value.trim();
+  if (!value) return;
+  const current = getSelectedCrmPolicies();
+  if (!current.includes(value)) current.push(value);
+  renderCrmPoliciesList(current);
+  input.value = "";
+  input.focus();
+}
+
 function openCrmAccountEditor(accountId = "") {
   const account = accountId ? getCrmAccount(accountId) : null;
   renderCrmStageOptions(document.querySelector("#crmAccountStage"));
+  renderCrmDatalist("crmAccountLocationOptions", collectCrmFieldOptions("location"));
+  renderCrmDatalist("crmAccountCategoryOptions", collectCrmFieldOptions("category"));
+  renderCrmDatalist("crmAccountPolicyStatusOptions", collectCrmFieldOptions("policyStatus"));
   document.querySelector("#crmAccountDialogTitle").textContent = account ? "編輯客戶" : "新增客戶";
   document.querySelector("#crmAccountId").value = account?.id || "";
   document.querySelector("#crmAccountName").value = account?.name || "";
@@ -2177,10 +2332,12 @@ function openCrmAccountEditor(accountId = "") {
   document.querySelector("#crmAccountCategory").value = account?.category || "";
   document.querySelector("#crmAccountBirthday").value = account?.birthday || "";
   document.querySelector("#crmAccountOccupation").value = account?.occupation || "";
-  document.querySelector("#crmAccountPretaxIncome").value = account?.pretaxIncome || "";
-  document.querySelector("#crmAccountMeetingCount").value = account ? `${getCrmMeetingCount(account)} 次` : "0 次";
-  document.querySelector("#crmAccountPolicies").value = account?.policies || "";
   document.querySelector("#crmAccountPolicyStatus").value = account?.policyStatus || "";
+  const initialProducts = Array.isArray(account?.products) && account.products.length
+    ? account.products
+    : splitPolicyProducts(account?.policies || "");
+  renderCrmPoliciesList(initialProducts);
+  document.querySelector("#crmAccountPoliciesNew").value = "";
   document.querySelector("#crmAccountBackground").value = account?.background || "";
   document.querySelector("#crmAccountNextStep").value = account?.nextStep || "";
   document.querySelector("#crmAccountNextFollowUp").value = account?.nextFollowUpDate || "";
@@ -2202,6 +2359,7 @@ function saveCrmAccount() {
   }
 
   const existing = crmState.accounts.find((account) => account.id === id);
+  const selectedProducts = getSelectedCrmPolicies();
   const account = normalizeCrmAccount({
     ...(existing || {}),
     id,
@@ -2211,8 +2369,8 @@ function saveCrmAccount() {
     category: document.querySelector("#crmAccountCategory").value.trim(),
     birthday: document.querySelector("#crmAccountBirthday").value,
     occupation: document.querySelector("#crmAccountOccupation").value.trim(),
-    pretaxIncome: document.querySelector("#crmAccountPretaxIncome").value.trim(),
-    policies: document.querySelector("#crmAccountPolicies").value.trim(),
+    policies: selectedProducts.join(", "),
+    products: selectedProducts,
     policyStatus: document.querySelector("#crmAccountPolicyStatus").value.trim(),
     background: document.querySelector("#crmAccountBackground").value.trim(),
     nextStep: document.querySelector("#crmAccountNextStep").value.trim(),
@@ -2321,6 +2479,13 @@ function bindCrmActions() {
   });
   document.querySelector("#cancelCrmAccountBtn").addEventListener("click", closeCrmAccountEditor);
   document.querySelector("#deleteCrmAccountBtn").addEventListener("click", deleteCrmAccount);
+  document.querySelector("#crmAccountPoliciesAddBtn").addEventListener("click", addCrmPolicyOption);
+  document.querySelector("#crmAccountPoliciesNew").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addCrmPolicyOption();
+    }
+  });
 }
 
 function bindFunnelActions() {

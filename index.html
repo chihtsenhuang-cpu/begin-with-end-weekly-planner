@@ -155,25 +155,6 @@
             </div>
           </div>
 
-          <div class="stats-grid funnel-stats-grid">
-            <article class="stat-block">
-              <span>漏斗紀錄</span>
-              <strong id="funnelTotalCount">0</strong>
-            </article>
-            <article class="stat-block">
-              <span>成交數</span>
-              <strong id="funnelClosedCount">0</strong>
-            </article>
-            <article class="stat-block">
-              <span>成交率</span>
-              <strong id="funnelCloseRate">0%</strong>
-            </article>
-            <article class="stat-block">
-              <span>最多發生</span>
-              <strong id="funnelLargestStage">-</strong>
-            </article>
-          </div>
-
           <div class="funnel-layout">
             <section class="settings-panel funnel-panel">
               <div class="settings-panel-header">
@@ -419,11 +400,13 @@
           </label>
           <label class="field-row">
             <span>所在地</span>
-            <input id="crmAccountLocation" type="text" placeholder="雙北桃園">
+            <input id="crmAccountLocation" type="text" list="crmAccountLocationOptions" placeholder="雙北桃園">
+            <datalist id="crmAccountLocationOptions"></datalist>
           </label>
           <label class="field-row">
             <span>分類</span>
-            <input id="crmAccountCategory" type="text" placeholder="原有客戶 / 新增名單">
+            <input id="crmAccountCategory" type="text" list="crmAccountCategoryOptions" placeholder="原有客戶 / 新增名單">
+            <datalist id="crmAccountCategoryOptions"></datalist>
           </label>
           <label class="field-row">
             <span>生日</span>
@@ -434,13 +417,18 @@
             <input id="crmAccountOccupation" type="text" placeholder="職業">
           </label>
           <label class="field-row">
-            <span>已有險種</span>
-            <input id="crmAccountPolicies" type="text" placeholder="一般醫療, 重大傷病">
-          </label>
-          <label class="field-row">
             <span>保單狀態</span>
-            <input id="crmAccountPolicyStatus" type="text" placeholder="正常 / 墊繳">
+            <input id="crmAccountPolicyStatus" type="text" list="crmAccountPolicyStatusOptions" placeholder="正常 / 墊繳">
+            <datalist id="crmAccountPolicyStatusOptions"></datalist>
           </label>
+        </div>
+        <div class="field-row crm-policies-row">
+          <span>已有險種</span>
+          <div id="crmAccountPoliciesList" class="crm-policies-list"></div>
+          <div class="crm-policies-add">
+            <input id="crmAccountPoliciesNew" type="text" placeholder="新增險種">
+            <button id="crmAccountPoliciesAddBtn" type="button" class="ghost-button">加入</button>
+          </div>
         </div>
         <label class="field-row">
           <span>客戶背景</span>
@@ -458,16 +446,6 @@
           <label class="field-row">
             <span>備註</span>
             <input id="crmAccountNotes" type="text" placeholder="補充資訊">
-          </label>
-        </div>
-        <div class="crm-form-grid">
-          <label class="field-row">
-            <span>税前收入</span>
-            <input id="crmAccountPretaxIncome" type="text" placeholder="整個流程的佣金稅前收入">
-          </label>
-          <label class="field-row">
-            <span>面談次數</span>
-            <input id="crmAccountMeetingCount" type="text" readonly>
           </label>
         </div>
         <footer>

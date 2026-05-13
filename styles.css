@@ -913,10 +913,6 @@ button {
   margin-bottom: 16px;
 }
 
-.funnel-stats-grid {
-  margin-bottom: 16px;
-}
-
 .funnel-controls {
   display: flex;
   align-items: end;
@@ -1250,6 +1246,45 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.crm-policies-row {
+  display: grid;
+  gap: 8px;
+}
+
+.crm-policies-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfa;
+  min-height: 40px;
+}
+
+.crm-policy-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.crm-policies-empty {
+  margin: 0;
+  color: var(--muted, #888);
+  font-size: 13px;
+}
+
+.crm-policies-add {
+  display: flex;
+  gap: 8px;
+}
+
+.crm-policies-add input {
+  flex: 1;
 }
 
 .crm-visit-item {
