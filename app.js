@@ -1875,7 +1875,7 @@ function renderCrmVisitTimeline(account) {
       ["結果", visit.result],
       ["下一步", visit.nextStep],
       ["下次追蹤", visit.nextFollowUpDate],
-      ["稅前收入", visit.pretaxIncome ? formatCrmMoney(parseCrmMoney(visit.pretaxIncome)) : ""]
+      ["税前收入", visit.pretaxIncome ? formatCrmMoney(parseCrmMoney(visit.pretaxIncome)) : ""]
     ].forEach(([label, value]) => {
       if (!isFilled(value)) return;
       const line = document.createElement("p");
@@ -1907,7 +1907,7 @@ function renderCrmVisitForm(account, editingVisitId = "") {
         <select name="stageAfter"></select>
       </label>
       <label class="field-row">
-        <span>稅前收入</span>
+        <span>税前收入</span>
         <input name="pretaxIncome" type="text" inputmode="decimal" placeholder="成交佣金">
       </label>
       <label class="field-row">
@@ -1995,6 +1995,8 @@ function renderCrmDetail(editingVisitId = "") {
     createCrmInfoItem("下一步", account.nextStep),
     createCrmInfoItem("下次追蹤", account.nextFollowUpDate),
     createCrmInfoItem("最近接觸", account.lastContactDate),
+    createCrmInfoItem("税前收入", formatCrmMoney(getCrmPretaxIncomeTotal(account))),
+    createCrmInfoItem("面談次數", `${getCrmMeetingCount(account)} 次`),
     createCrmInfoItem("面談效益", getCrmMeetingCount(account) ? formatCrmMoney(getCrmMeetingEfficiency(account)) : "")
   );
 
@@ -2008,9 +2010,7 @@ function renderCrmDetail(editingVisitId = "") {
     createCrmInfoItem("已有險種", account.policies),
     createCrmInfoItem("保單狀態", account.policyStatus),
     createCrmInfoItem("客戶背景", account.background),
-    createCrmInfoItem("備註", account.notes),
-    createCrmInfoItem("稅前收入", formatCrmMoney(getCrmPretaxIncomeTotal(account))),
-    createCrmInfoItem("見面次數", `${getCrmMeetingCount(account)} 次`)
+    createCrmInfoItem("備註", account.notes)
   );
 
   const visitBlock = document.createElement("section");

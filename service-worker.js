@@ -1,4 +1,4 @@
-const cacheName = "begin-with-end-weekly-planner-v29";
+const cacheName = "begin-with-end-weekly-planner-v30";
 const appShell = [
   "./",
   "./index.html",
