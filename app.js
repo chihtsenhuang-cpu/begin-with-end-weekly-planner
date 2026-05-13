@@ -516,6 +516,15 @@ function getCrmAccountLatestVisit(accountId) {
   return getCrmVisits(accountId)[0] || null;
 }
 
+function getCrmFaceToFaceVisitCount(accountId) {
+  return crmState.visits.filter((visit) => visit.accountId === accountId && visit.method === "面訪").length;
+}
+
+function getCrmMeetingCount(account) {
+  const importedCount = Number.isFinite(account?.legacyVisitCount) ? account.legacyVisitCount : 0;
+  return importedCount + getCrmFaceToFaceVisitCount(account.id);
+}
+
 function getCrmAccountImportedStage(account) {
   if (!account?.sourceRaw) return "";
   return getLegacyActiveStage(account.sourceRaw);
@@ -1955,12 +1964,12 @@ function renderCrmDetail(editingVisitId = "") {
     createCrmInfoItem("分類", account.category),
     createCrmInfoItem("生日", account.birthday),
     createCrmInfoItem("職業", account.occupation),
-    createCrmInfoItem("稅前收入", account.pretaxIncome),
     createCrmInfoItem("已有險種", account.policies),
     createCrmInfoItem("保單狀態", account.policyStatus),
-    createCrmInfoItem("舊表見面次數", Number.isFinite(account.legacyVisitCount) ? `${account.legacyVisitCount} 次` : ""),
     createCrmInfoItem("客戶背景", account.background),
-    createCrmInfoItem("備註", account.notes)
+    createCrmInfoItem("備註", account.notes),
+    createCrmInfoItem("稅前收入", account.pretaxIncome),
+    createCrmInfoItem("見面次數", `${getCrmMeetingCount(account)} 次`)
   );
 
   const visitBlock = document.createElement("section");
@@ -2103,6 +2112,8 @@ function openCrmAccountEditor(accountId = "") {
   document.querySelector("#crmAccountCategory").value = account?.category || "";
   document.querySelector("#crmAccountBirthday").value = account?.birthday || "";
   document.querySelector("#crmAccountOccupation").value = account?.occupation || "";
+  document.querySelector("#crmAccountPretaxIncome").value = account?.pretaxIncome || "";
+  document.querySelector("#crmAccountMeetingCount").value = account ? `${getCrmMeetingCount(account)} 次` : "0 次";
   document.querySelector("#crmAccountPolicies").value = account?.policies || "";
   document.querySelector("#crmAccountPolicyStatus").value = account?.policyStatus || "";
   document.querySelector("#crmAccountBackground").value = account?.background || "";
@@ -2135,6 +2146,7 @@ function saveCrmAccount() {
     category: document.querySelector("#crmAccountCategory").value.trim(),
     birthday: document.querySelector("#crmAccountBirthday").value,
     occupation: document.querySelector("#crmAccountOccupation").value.trim(),
+    pretaxIncome: document.querySelector("#crmAccountPretaxIncome").value.trim(),
     policies: document.querySelector("#crmAccountPolicies").value.trim(),
     policyStatus: document.querySelector("#crmAccountPolicyStatus").value.trim(),
     background: document.querySelector("#crmAccountBackground").value.trim(),
