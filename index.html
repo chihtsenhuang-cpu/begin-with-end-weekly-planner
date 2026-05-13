@@ -32,6 +32,8 @@
     <main class="app-shell">
       <aside class="side-panel" aria-label="功能導覽">
         <button class="nav-button active" type="button" data-view="planner">週計畫</button>
+        <button class="nav-button" type="button" data-view="crm">CRM 拜訪</button>
+        <button class="nav-button" type="button" data-view="funnel">業務漏斗</button>
         <button class="nav-button" type="button" data-view="victories">三個勝利</button>
         <button class="nav-button" type="button" data-view="review">統計回顧</button>
         <button class="nav-button" type="button" data-view="lookback">回顧本</button>
@@ -69,6 +71,111 @@
             <div class="table-title">精益求精</div>
             <div id="renewalGrid" class="renewal-grid"></div>
           </section>
+        </section>
+
+        <section id="crm" class="view" aria-labelledby="crmTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">CRM Workbench</p>
+              <h2 id="crmTitle">客戶狀況與拜訪紀錄</h2>
+            </div>
+            <div class="button-row compact-row">
+              <button id="importCrmLegacyBtn" type="button" class="ghost-button">匯入舊資料</button>
+              <button id="addCrmAccountBtn" type="button" class="primary-button">新增客戶</button>
+            </div>
+          </div>
+
+          <div class="stats-grid crm-stats-grid">
+            <article class="stat-block">
+              <span>客戶數</span>
+              <strong id="crmAccountCount">0</strong>
+            </article>
+            <article class="stat-block">
+              <span>待跟進</span>
+              <strong id="crmFollowUpCount">0</strong>
+            </article>
+            <article class="stat-block">
+              <span>30天拜訪</span>
+              <strong id="crmRecentVisitCount">0</strong>
+            </article>
+            <article class="stat-block">
+              <span>拜訪紀錄</span>
+              <strong id="crmVisitCount">0</strong>
+            </article>
+          </div>
+
+          <div class="crm-workbench">
+            <section class="settings-panel crm-list-panel" aria-label="客戶清單">
+              <div class="settings-panel-header">
+                <h3>客戶清單</h3>
+              </div>
+              <div class="crm-filters">
+                <input id="crmSearch" type="search" placeholder="搜尋姓名、分類、備註" aria-label="搜尋客戶">
+                <select id="crmStageFilter" aria-label="階段篩選"></select>
+              </div>
+              <div id="crmAccountList" class="crm-account-list"></div>
+            </section>
+
+            <section class="settings-panel crm-detail-panel" aria-label="客戶詳情">
+              <div id="crmDetail" class="crm-detail"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="funnel" class="view" aria-labelledby="funnelTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Sales Funnel</p>
+              <h2 id="funnelTitle">業務漏斗</h2>
+            </div>
+            <div class="funnel-controls">
+              <label class="field-row">
+                <span>年份</span>
+                <input id="funnelYear" type="number" min="2000" max="2100" step="1">
+              </label>
+              <label class="field-row">
+                <span>區間</span>
+                <select id="funnelHalf">
+                  <option value="H1">上半年</option>
+                  <option value="H2">下半年</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="stats-grid funnel-stats-grid">
+            <article class="stat-block">
+              <span>漏斗紀錄</span>
+              <strong id="funnelTotalCount">0</strong>
+            </article>
+            <article class="stat-block">
+              <span>成交數</span>
+              <strong id="funnelClosedCount">0</strong>
+            </article>
+            <article class="stat-block">
+              <span>成交率</span>
+              <strong id="funnelCloseRate">0%</strong>
+            </article>
+            <article class="stat-block">
+              <span>最多發生</span>
+              <strong id="funnelLargestStage">-</strong>
+            </article>
+          </div>
+
+          <div class="funnel-layout">
+            <section class="settings-panel funnel-panel">
+              <div class="settings-panel-header">
+                <h3>階段分布</h3>
+              </div>
+              <div id="funnelStageList" class="funnel-stage-list"></div>
+            </section>
+            <section class="settings-panel funnel-panel">
+              <div class="settings-panel-header">
+                <h3 id="funnelAccountTitle">階段紀錄</h3>
+              </div>
+              <div id="funnelAccountList" class="funnel-account-list"></div>
+            </section>
+          </div>
         </section>
 
         <section id="victories" class="view" aria-labelledby="victoriesTitle">
@@ -198,6 +305,7 @@
               <div class="button-row">
                 <button id="saveSupabaseBtn" type="button" class="ghost-button">儲存設定</button>
                 <button id="sendMagicLinkBtn" type="button" class="primary-button">寄送登入連結</button>
+                <button id="syncCrmToCloudBtn" type="button" class="ghost-button">同步 CRM 到雲端</button>
                 <button id="syncFromCloudBtn" type="button" class="ghost-button">從雲端載入</button>
                 <button id="signOutBtn" type="button" class="ghost-button">登出</button>
               </div>
@@ -248,6 +356,101 @@
         <footer>
           <button id="deleteScheduleBtn" type="button" class="danger-button">刪除</button>
           <button type="submit" class="primary-button">套用</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="crmImportDialog" class="schedule-dialog crm-import-dialog">
+      <form id="crmImportForm" method="dialog">
+        <header>
+          <h3>匯入舊客戶資料</h3>
+          <button id="cancelCrmImportBtn" type="button" class="plain-icon" aria-label="關閉">×</button>
+        </header>
+        <label class="field-row">
+          <span>來源名稱</span>
+          <input id="crmImportSourceName" type="text" value="客戶紀錄" placeholder="例如：客戶紀錄 Google Sheet">
+        </label>
+        <label class="field-row">
+          <span>來源網址</span>
+          <input id="crmImportSourceUrl" type="url" placeholder="Google Sheet 或原始檔網址">
+        </label>
+        <label class="field-row">
+          <span>CSV / TSV 檔</span>
+          <input id="crmImportFile" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values">
+        </label>
+        <label class="field-row">
+          <span>或貼上表格資料</span>
+          <textarea id="crmImportText" rows="8" placeholder="貼上含表頭的資料，例如從 Google Sheet 複製 A1:V100"></textarea>
+        </label>
+        <div id="crmImportStatus" class="supabase-status">會依表頭對應舊欄位；登入 Supabase 後會同步寫入 CRM 資料表。</div>
+        <footer>
+          <button type="submit" class="primary-button">匯入客戶</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="crmAccountDialog" class="schedule-dialog crm-account-dialog">
+      <form id="crmAccountForm" method="dialog">
+        <input id="crmAccountId" type="hidden">
+        <header>
+          <h3 id="crmAccountDialogTitle">新增客戶</h3>
+          <button id="cancelCrmAccountBtn" type="button" class="plain-icon" aria-label="關閉">×</button>
+        </header>
+        <div class="crm-form-grid">
+          <label class="field-row">
+            <span>姓名</span>
+            <input id="crmAccountName" type="text" required placeholder="客戶姓名">
+          </label>
+          <label class="field-row">
+            <span>目前階段</span>
+            <select id="crmAccountStage"></select>
+          </label>
+          <label class="field-row">
+            <span>所在地</span>
+            <input id="crmAccountLocation" type="text" placeholder="雙北桃園">
+          </label>
+          <label class="field-row">
+            <span>分類</span>
+            <input id="crmAccountCategory" type="text" placeholder="原有客戶 / 新增名單">
+          </label>
+          <label class="field-row">
+            <span>生日</span>
+            <input id="crmAccountBirthday" type="date">
+          </label>
+          <label class="field-row">
+            <span>職業</span>
+            <input id="crmAccountOccupation" type="text" placeholder="職業">
+          </label>
+          <label class="field-row">
+            <span>已有險種</span>
+            <input id="crmAccountPolicies" type="text" placeholder="一般醫療, 重大傷病">
+          </label>
+          <label class="field-row">
+            <span>保單狀態</span>
+            <input id="crmAccountPolicyStatus" type="text" placeholder="正常 / 墊繳">
+          </label>
+        </div>
+        <label class="field-row">
+          <span>客戶背景</span>
+          <textarea id="crmAccountBackground" rows="3" placeholder="關係、來源、重要脈絡"></textarea>
+        </label>
+        <label class="field-row">
+          <span>下一步</span>
+          <input id="crmAccountNextStep" type="text" placeholder="下一個要做的動作">
+        </label>
+        <div class="crm-form-grid">
+          <label class="field-row">
+            <span>下次追蹤日期</span>
+            <input id="crmAccountNextFollowUp" type="date">
+          </label>
+          <label class="field-row">
+            <span>備註</span>
+            <input id="crmAccountNotes" type="text" placeholder="補充資訊">
+          </label>
+        </div>
+        <footer>
+          <button id="deleteCrmAccountBtn" type="button" class="danger-button">刪除</button>
+          <button type="submit" class="primary-button">儲存客戶</button>
         </footer>
       </form>
     </dialog>

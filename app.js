@@ -35,16 +35,43 @@ const defaultRoles = [
 const storageKey = "begin-with-end-week-plan";
 const weekStoragePrefix = `${storageKey}:week:`;
 const supabaseSettingsKey = "begin-with-end-supabase-settings";
+const crmStorageKey = "begin-with-end-crm-workbench";
+const crmStages = ["尚未聯絡", "初步聯繫", "財務＆保單分析", "說明與口頭", "建議書", "成交", "轉介紹", "保服", "理賠", "暫緩"];
+const crmFunnelStages = ["尚未聯絡", "初步聯繫", "財務＆保單分析", "說明與口頭", "建議書", "成交"];
+const crmMethods = ["電話", "LINE", "面訪", "視訊", "Email", "其他"];
+const crmLegacyStageHeaders = ["尚未聯絡", "初步聯繫", "財務 (保單) 分析", "說明＆口頭", "建議書", "成交", "轉介紹", "轉介紹成交", "保服", "理賠"];
+const crmLegacyColumns = {
+  name: "0姓名",
+  location: "0.所在地",
+  category: "分類",
+  birthday: "生日",
+  occupation: "職業",
+  policies: "已有險種",
+  policyStatus: "保單狀態",
+  legacyVisitCount: "見面次數",
+  pretaxIncome: "税前收入",
+  background: "客戶背景",
+  nextStep: "行動計劃",
+  notes: "備註"
+};
 let state = loadState();
+let crmState = loadCrmState();
 let selectedVictoryDate = toDateInputValue(new Date());
 let lookbackMode = "daily";
 let selectedLookbackDate = toDateInputValue(new Date());
 let selectedLookbackRoleIndex = "all";
+let selectedCrmAccountId = crmState.accounts[0]?.id || "";
+let selectedCrmStageFilter = "all";
+let expandedCrmLocations = new Set();
+let selectedFunnelYear = new Date().getFullYear();
+let selectedFunnelHalf = new Date().getMonth() < 6 ? "H1" : "H2";
+let selectedFunnelStage = "all";
 let reminderTimer = null;
 let deferredInstallPrompt = null;
 let supabaseClient = null;
 let supabaseSession = null;
 let cloudSaveTimer = null;
+let crmCloudSaveTimer = null;
 
 function getSunday(date = new Date()) {
   const copy = new Date(date);
@@ -64,10 +91,11 @@ function formatDate(date) {
 }
 
 function createEmptyWeek(startDate = getSunday()) {
+  const emptyImportantItem = () => ({ text: "", done: false });
   return {
     weekStart: toDateInputValue(startDate),
     roles: structuredClone(defaultRoles),
-    important: Array.from({ length: 7 }, () => Array(importantSlots).fill("")),
+    important: Array.from({ length: 7 }, () => Array.from({ length: importantSlots }, emptyImportantItem)),
     schedule: [],
     renewal: Object.fromEntries(renewalAreas.map((area) => [area, ""])),
     emotions: Object.fromEntries(emotions.map((name) => [name, { score: 0, note: "" }])),
@@ -357,6 +385,7 @@ function saveState(showToast = false) {
   }
   updateStats();
   renderLookback();
+  renderCrm();
   scheduleReminder();
   queueCloudSave();
 }
@@ -379,6 +408,405 @@ function saveSupabaseSettings(settings) {
   localStorage.setItem(supabaseSettingsKey, JSON.stringify(settings));
   state.settings.supabase = settings;
   persistStateLocally();
+}
+
+function createEmptyCrmState() {
+  return {
+    accounts: [],
+    visits: [],
+    importBatches: [],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function loadCrmState() {
+  try {
+    return normalizeCrmState(JSON.parse(localStorage.getItem(crmStorageKey) || "{}"));
+  } catch {
+    return createEmptyCrmState();
+  }
+}
+
+function normalizeCrmState(data = {}) {
+  const base = createEmptyCrmState();
+  const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+  const visits = Array.isArray(data.visits) ? data.visits : [];
+  const importBatches = Array.isArray(data.importBatches) ? data.importBatches : [];
+  return {
+    ...base,
+    ...data,
+    accounts: accounts.map(normalizeCrmAccount).filter((account) => isFilled(account.name)),
+    visits: visits.map(normalizeCrmVisit).filter((visit) => isFilled(visit.accountId)),
+    importBatches
+  };
+}
+
+function normalizeCrmStage(stage) {
+  const map = {
+    財務分析: "財務＆保單分析",
+    "財務 (保單) 分析": "財務＆保單分析",
+    "說明＆口頭": "說明與口頭",
+    轉介紹成交: "成交"
+  };
+  return map[stage] || stage;
+}
+
+function normalizeCrmAccount(account) {
+  const stage = normalizeCrmStage(account?.stage);
+  return {
+    id: account?.id || crypto.randomUUID(),
+    sourceKey: account?.sourceKey || "",
+    name: account?.name || "",
+    stage: crmStages.includes(stage) ? stage : "尚未聯絡",
+    location: account?.location || "",
+    category: account?.category || "",
+    birthday: account?.birthday || "",
+    occupation: account?.occupation || "",
+    pretaxIncome: account?.pretaxIncome || "",
+    policies: account?.policies || "",
+    products: Array.isArray(account?.products) ? account.products.filter(isFilled) : splitPolicyProducts(account?.policies || ""),
+    policyStatus: account?.policyStatus || "",
+    background: account?.background || "",
+    nextStep: account?.nextStep || "",
+    nextFollowUpDate: account?.nextFollowUpDate || "",
+    notes: account?.notes || "",
+    legacyVisitCount: isFilled(account?.legacyVisitCount) && Number.isFinite(Number(account.legacyVisitCount)) ? Number(account.legacyVisitCount) : null,
+    sourceRaw: account?.sourceRaw || {},
+    lastContactDate: account?.lastContactDate || "",
+    createdAt: account?.createdAt || new Date().toISOString(),
+    updatedAt: account?.updatedAt || new Date().toISOString()
+  };
+}
+
+function normalizeCrmVisit(visit) {
+  const stageAfter = normalizeCrmStage(visit?.stageAfter);
+  return {
+    id: visit?.id || crypto.randomUUID(),
+    accountId: visit?.accountId || "",
+    date: visit?.date || toDateInputValue(new Date()),
+    method: crmMethods.includes(visit?.method) ? visit.method : "面訪",
+    summary: visit?.summary || "",
+    result: visit?.result || "",
+    nextStep: visit?.nextStep || "",
+    nextFollowUpDate: visit?.nextFollowUpDate || "",
+    stageAfter: crmStages.includes(stageAfter) ? stageAfter : "",
+    createdAt: visit?.createdAt || new Date().toISOString()
+  };
+}
+
+function saveCrmState() {
+  crmState.updatedAt = new Date().toISOString();
+  localStorage.setItem(crmStorageKey, JSON.stringify(crmState));
+  renderCrm();
+  renderFunnel();
+  queueCrmCloudSave();
+}
+
+function getCrmAccount(accountId = selectedCrmAccountId) {
+  return crmState.accounts.find((account) => account.id === accountId) || null;
+}
+
+function getCrmVisits(accountId) {
+  return crmState.visits
+    .filter((visit) => visit.accountId === accountId)
+    .sort((a, b) => `${b.date} ${b.createdAt}`.localeCompare(`${a.date} ${a.createdAt}`));
+}
+
+function getCrmAccountLatestVisit(accountId) {
+  return getCrmVisits(accountId)[0] || null;
+}
+
+function getCrmAccountImportedStage(account) {
+  if (!account?.sourceRaw) return "";
+  return getLegacyActiveStage(account.sourceRaw);
+}
+
+function applyLatestVisitToCrmAccount(account, fallbackStage = "") {
+  const latest = getCrmAccountLatestVisit(account.id);
+  if (latest) {
+    account.stage = latest.stageAfter || account.stage;
+    account.nextStep = latest.nextStep;
+    account.nextFollowUpDate = latest.nextFollowUpDate;
+    account.lastContactDate = latest.date;
+  } else {
+    account.stage = fallbackStage || getCrmAccountImportedStage(account) || "尚未聯絡";
+    account.nextStep = "";
+    account.nextFollowUpDate = "";
+    account.lastContactDate = "";
+  }
+  account.updatedAt = new Date().toISOString();
+}
+
+function isCrmFollowUpDue(account) {
+  if (!account.nextFollowUpDate) return isFilled(account.nextStep);
+  return account.nextFollowUpDate <= toDateInputValue(new Date());
+}
+
+function getRecentCrmVisits() {
+  const today = new Date(`${toDateInputValue(new Date())}T00:00:00`);
+  const since = new Date(today);
+  since.setDate(today.getDate() - 30);
+  const sinceValue = toDateInputValue(since);
+  return crmState.visits.filter((visit) => visit.date >= sinceValue);
+}
+
+function getFunnelRange() {
+  return selectedFunnelHalf === "H1"
+    ? { start: `${selectedFunnelYear}-01-01`, end: `${selectedFunnelYear}-06-30`, label: `${selectedFunnelYear} 上半年` }
+    : { start: `${selectedFunnelYear}-07-01`, end: `${selectedFunnelYear}-12-31`, label: `${selectedFunnelYear} 下半年` };
+}
+
+function toDateValueFromIso(value) {
+  return String(value || "").slice(0, 10);
+}
+
+function getAccountFunnelDate(account) {
+  return account.lastContactDate || toDateValueFromIso(account.updatedAt) || toDateValueFromIso(account.createdAt);
+}
+
+function isDateInFunnelRange(dateValue) {
+  if (!dateValue) return false;
+  const range = getFunnelRange();
+  return dateValue >= range.start && dateValue <= range.end;
+}
+
+function getFunnelAccounts() {
+  const accounts = new Map();
+  getFunnelEvents().forEach((event) => {
+    if (event.account) accounts.set(event.account.id, event.account);
+  });
+  return [...accounts.values()];
+}
+
+function getLegacyFunnelStages(account) {
+  const stages = crmLegacyStageHeaders
+    .filter((stage) => isLegacyChecked(account.sourceRaw?.[stage]))
+    .map(normalizeLegacyStage)
+    .filter((stage) => crmFunnelStages.includes(stage));
+  const unique = [...new Set(stages)];
+  if (unique.length) return unique;
+  return crmFunnelStages.includes(account.stage) ? [account.stage] : [];
+}
+
+function getFunnelEvents() {
+  const events = [];
+  const accountsWithVisits = new Set();
+  crmState.visits.forEach((visit) => {
+    accountsWithVisits.add(visit.accountId);
+    if (!crmFunnelStages.includes(visit.stageAfter) || !isDateInFunnelRange(visit.date)) return;
+    const account = getCrmAccount(visit.accountId);
+    if (!account) return;
+    events.push({
+      id: visit.id,
+      account,
+      visit,
+      stage: visit.stageAfter,
+      date: visit.date,
+      label: visit.method,
+      source: "visit"
+    });
+  });
+
+  crmState.accounts.forEach((account) => {
+    if (accountsWithVisits.has(account.id) || !isDateInFunnelRange(getAccountFunnelDate(account))) return;
+    getLegacyFunnelStages(account).forEach((stage) => {
+      events.push({
+        id: `${account.id}:${stage}`,
+        account,
+        visit: null,
+        stage,
+        date: getAccountFunnelDate(account),
+        label: "匯入資料",
+        source: "legacy"
+      });
+    });
+  });
+
+  return events.sort((a, b) => (
+    b.date.localeCompare(a.date) ||
+    crmFunnelStages.indexOf(a.stage) - crmFunnelStages.indexOf(b.stage) ||
+    a.account.name.localeCompare(b.account.name, "zh-Hant", { numeric: true, sensitivity: "base" })
+  ));
+}
+
+function getFunnelSummary() {
+  const events = getFunnelEvents();
+  const accounts = [...new Map(events.map((event) => [event.account.id, event.account])).values()];
+  const byStage = Object.fromEntries(crmFunnelStages.map((stage) => [stage, []]));
+  events.forEach((event) => {
+    byStage[event.stage].push(event);
+  });
+  return { accounts, events, byStage };
+}
+
+function splitPolicyProducts(policies) {
+  return String(policies || "")
+    .split(/[,，、]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeImportHeader(value) {
+  return String(value || "").replace(/^\uFEFF/, "").trim();
+}
+
+function parseDelimitedLine(line, delimiter) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells.map((cell) => cell.trim());
+}
+
+function parseDelimitedTable(text) {
+  const lines = String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim().length);
+  if (!lines.length) return [];
+  const delimiter = lines[0].includes("\t") ? "\t" : ",";
+  return lines.map((line) => parseDelimitedLine(line, delimiter));
+}
+
+function normalizeImportDate(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const normalized = text.replace(/\//g, "-");
+  const parts = normalized.split("-").map((part) => part.padStart(2, "0"));
+  if (parts.length === 3 && /^\d{4}$/.test(parts[0])) return `${parts[0]}-${parts[1]}-${parts[2]}`;
+  return "";
+}
+
+function isLegacyChecked(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["true", "1", "yes", "y", "v", "x", "是", "✓", "✔"].includes(normalized);
+}
+
+function normalizeLegacyStage(stage) {
+  return normalizeCrmStage(stage);
+}
+
+function getLegacyActiveStage(raw) {
+  const checked = crmLegacyStageHeaders.filter((stage) => isLegacyChecked(raw[stage]));
+  return normalizeLegacyStage(checked.at(-1) || "尚未聯絡");
+}
+
+function createLegacySourceKey(raw) {
+  return [raw[crmLegacyColumns.name], raw[crmLegacyColumns.birthday], raw[crmLegacyColumns.location]]
+    .map((value) => String(value || "").trim())
+    .join("|");
+}
+
+function legacyRowToCrmAccount(headers, row) {
+  const raw = Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]));
+  const policies = raw[crmLegacyColumns.policies] || "";
+  return normalizeCrmAccount({
+    sourceKey: createLegacySourceKey(raw),
+    name: raw[crmLegacyColumns.name] || "",
+    stage: getLegacyActiveStage(raw),
+    location: raw[crmLegacyColumns.location] || "",
+    category: raw[crmLegacyColumns.category] || "",
+    birthday: normalizeImportDate(raw[crmLegacyColumns.birthday]),
+    occupation: raw[crmLegacyColumns.occupation] || "",
+    pretaxIncome: raw[crmLegacyColumns.pretaxIncome] || "",
+    policies,
+    products: splitPolicyProducts(policies),
+    policyStatus: raw[crmLegacyColumns.policyStatus] || "",
+    background: raw[crmLegacyColumns.background] || "",
+    nextStep: raw[crmLegacyColumns.nextStep] || "",
+    notes: raw[crmLegacyColumns.notes] || "",
+    legacyVisitCount: raw[crmLegacyColumns.legacyVisitCount] || null,
+    sourceRaw: raw
+  });
+}
+
+function importLegacyCrmRows(text, source = {}) {
+  const rows = parseDelimitedTable(text);
+  if (rows.length < 2) return { imported: 0, skipped: 0, reason: "資料不足，至少要有表頭和一列資料。" };
+  const headers = rows[0].map(normalizeImportHeader);
+  if (!headers.includes(crmLegacyColumns.name)) {
+    return { imported: 0, skipped: rows.length - 1, reason: "找不到表頭「0姓名」，請確認匯入的是客戶紀錄原始表。" };
+  }
+
+  const batch = {
+    id: crypto.randomUUID(),
+    sourceType: source.sourceType || "csv",
+    sourceName: source.sourceName || "客戶紀錄",
+    sourceUrl: source.sourceUrl || "",
+    sheetName: source.sheetName || "",
+    rowCount: rows.length - 1,
+    status: "imported",
+    importedAt: new Date().toISOString(),
+    rows: []
+  };
+  const byKey = new Map(crmState.accounts.map((account) => [account.sourceKey || account.id, account]));
+  let imported = 0;
+  let skipped = 0;
+
+  rows.slice(1).forEach((row, index) => {
+    const account = legacyRowToCrmAccount(headers, row);
+    const rowRecord = {
+      id: crypto.randomUUID(),
+      rowNumber: index + 2,
+      accountId: account.id,
+      rawData: account.sourceRaw,
+      importStatus: "imported",
+      errorMessage: ""
+    };
+    if (!isFilled(account.name)) {
+      skipped += 1;
+      rowRecord.accountId = "";
+      rowRecord.importStatus = "skipped";
+      rowRecord.errorMessage = "姓名空白";
+      batch.rows.push(rowRecord);
+      return;
+    }
+    const existing = byKey.get(account.sourceKey);
+    if (existing) account.id = existing.id;
+    byKey.set(account.sourceKey, account);
+    rowRecord.accountId = account.id;
+    batch.rows.push(rowRecord);
+    imported += 1;
+  });
+
+  crmState.accounts = [...byKey.values()];
+  crmState.importBatches.push(batch);
+  saveCrmState();
+  selectedCrmAccountId = crmState.accounts[0]?.id || "";
+  return { imported, skipped, batch };
+}
+
+function setCrmImportStatus(message) {
+  const status = document.querySelector("#crmImportStatus");
+  if (status) status.textContent = message;
+}
+
+function getFilteredCrmAccounts() {
+  const search = document.querySelector("#crmSearch")?.value.trim().toLowerCase() || "";
+  return crmState.accounts
+    .filter((account) => selectedCrmStageFilter === "all" || account.stage === selectedCrmStageFilter)
+    .filter((account) => {
+      if (!search) return true;
+      return [account.name, account.location, account.category, account.occupation, account.policyStatus, account.background, account.nextStep, account.notes]
+        .some((value) => String(value || "").toLowerCase().includes(search));
+    })
+    .sort((a, b) => Number(isCrmFollowUpDue(b)) - Number(isCrmFollowUpDue(a)) || a.name.localeCompare(b.name, "zh-Hant"));
 }
 
 function getPlanPayload() {
@@ -430,8 +858,11 @@ async function initializeSupabase() {
   supabaseClient.auth.onAuthStateChange((_event, session) => {
     supabaseSession = session;
     updateSupabaseStatus();
+    loadCrmFromCloud().then(() => queueCrmCloudSave());
   });
   updateSupabaseStatus();
+  await loadCrmFromCloud();
+  queueCrmCloudSave();
 }
 
 function updateSupabaseStatus(extraMessage = "") {
@@ -455,6 +886,14 @@ function queueCloudSave() {
   }, 700);
 }
 
+function queueCrmCloudSave() {
+  if (!supabaseClient || !supabaseSession?.user) return;
+  if (crmCloudSaveTimer) clearTimeout(crmCloudSaveTimer);
+  crmCloudSaveTimer = setTimeout(() => {
+    saveCrmToCloud();
+  }, 900);
+}
+
 async function savePlanToCloud(showStatus = false) {
   if (!supabaseClient || !supabaseSession?.user) return false;
   const payload = {
@@ -472,6 +911,252 @@ async function savePlanToCloud(showStatus = false) {
   }
   if (showStatus) updateSupabaseStatus("已同步到 Supabase。");
   return true;
+}
+
+function mapCrmAccountToCloud(account) {
+  return {
+    id: account.id,
+    user_id: supabaseSession.user.id,
+    source_key: account.sourceKey || null,
+    name: account.name,
+    current_stage: account.stage,
+    location: account.location || null,
+    category: account.category || null,
+    birthday: account.birthday || null,
+    occupation: account.occupation || null,
+    pretax_income: account.pretaxIncome || null,
+    policies: account.policies || null,
+    policy_status: account.policyStatus || null,
+    background: account.background || null,
+    next_step: account.nextStep || null,
+    next_follow_up_date: account.nextFollowUpDate || null,
+    notes: account.notes || null,
+    legacy_visit_count: Number.isFinite(account.legacyVisitCount) ? account.legacyVisitCount : null,
+    source_raw: account.sourceRaw || {},
+    last_contact_date: account.lastContactDate || null,
+    created_at: account.createdAt,
+    updated_at: account.updatedAt
+  };
+}
+
+function mapCrmVisitToCloud(visit) {
+  return {
+    id: visit.id,
+    user_id: supabaseSession.user.id,
+    account_id: visit.accountId,
+    contact_date: visit.date,
+    method: visit.method,
+    summary: visit.summary || null,
+    result: visit.result || null,
+    next_step: visit.nextStep || null,
+    next_follow_up_date: visit.nextFollowUpDate || null,
+    stage_after: visit.stageAfter || null,
+    created_at: visit.createdAt,
+    updated_at: new Date().toISOString()
+  };
+}
+
+async function saveCrmToCloud(showStatus = false) {
+  if (!supabaseClient || !supabaseSession?.user) return false;
+  const warnings = [];
+
+  const accounts = crmState.accounts.map(mapCrmAccountToCloud);
+  if (accounts.length) {
+    const { error } = await supabaseClient.from("crm_accounts").upsert(accounts, { onConflict: "id" });
+    if (error) {
+      setSupabaseStatus(`CRM 同步失敗：${error.message}`);
+      return false;
+    }
+  }
+
+  const productRows = crmState.accounts.flatMap((account) => (
+    (account.products || splitPolicyProducts(account.policies)).map((product) => ({
+      user_id: supabaseSession.user.id,
+      account_id: account.id,
+      product_type: product,
+      note: null
+    }))
+  ));
+  if (productRows.length) {
+    const { error } = await supabaseClient
+      .from("crm_account_products")
+      .upsert(productRows, { onConflict: "user_id,account_id,product_type" });
+    if (error) {
+      setSupabaseStatus(`CRM 險種同步失敗：${error.message}`);
+      return false;
+    }
+  }
+
+  const visits = crmState.visits.map(mapCrmVisitToCloud);
+  if (visits.length) {
+    const { error } = await supabaseClient.from("crm_visit_records").upsert(visits, { onConflict: "id" });
+    if (error) {
+      setSupabaseStatus(`CRM 拜訪紀錄同步失敗：${error.message}`);
+      return false;
+    }
+  }
+
+  const batches = crmState.importBatches || [];
+  if (batches.length) {
+    const batchRows = batches.map((batch) => ({
+      id: batch.id,
+      user_id: supabaseSession.user.id,
+      source_type: batch.sourceType,
+      source_name: batch.sourceName || null,
+      source_url: batch.sourceUrl || null,
+      sheet_name: batch.sheetName || null,
+      row_count: batch.rowCount || 0,
+      status: batch.status || "imported",
+      imported_at: batch.importedAt
+    }));
+    const { error: batchError } = await supabaseClient.from("crm_import_batches").upsert(batchRows, { onConflict: "id" });
+    if (batchError) {
+      setSupabaseStatus(`CRM 匯入批次同步失敗：${batchError.message}`);
+      return false;
+    }
+
+    const importRows = batches.flatMap((batch) => (batch.rows || []).map((row) => ({
+      id: row.id,
+      user_id: supabaseSession.user.id,
+      batch_id: batch.id,
+      row_number: row.rowNumber,
+      account_id: row.accountId || null,
+      raw_data: row.rawData || {},
+      import_status: row.importStatus || "imported",
+      error_message: row.errorMessage || null
+    })));
+    if (importRows.length) {
+      const { error: rowError } = await supabaseClient.from("crm_import_rows").upsert(importRows, { onConflict: "id" });
+      if (rowError) {
+        warnings.push(`匯入原始列未同步：${rowError.message}`);
+      }
+    }
+  }
+
+  if (showStatus) {
+    const warningText = warnings.length ? `；${warnings.join("；")}` : "";
+    updateSupabaseStatus(`CRM 已同步到 Supabase：${crmState.accounts.length} 位客戶、${crmState.visits.length} 筆拜訪${warningText}`);
+  }
+  return true;
+}
+
+function cloudAccountToLocal(row, productsByAccount = new Map()) {
+  const products = productsByAccount.get(row.id) || splitPolicyProducts(row.policies || "");
+  return normalizeCrmAccount({
+    id: row.id,
+    sourceKey: row.source_key || "",
+    name: row.name || "",
+    stage: row.current_stage || "尚未聯絡",
+    location: row.location || "",
+    category: row.category || "",
+    birthday: row.birthday || "",
+    occupation: row.occupation || "",
+    pretaxIncome: row.pretax_income || "",
+    policies: row.policies || products.join(", "),
+    products,
+    policyStatus: row.policy_status || "",
+    background: row.background || "",
+    nextStep: row.next_step || "",
+    nextFollowUpDate: row.next_follow_up_date || "",
+    notes: row.notes || "",
+    legacyVisitCount: row.legacy_visit_count,
+    sourceRaw: row.source_raw || {},
+    lastContactDate: row.last_contact_date || "",
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString()
+  });
+}
+
+function cloudVisitToLocal(row) {
+  return normalizeCrmVisit({
+    id: row.id,
+    accountId: row.account_id,
+    date: row.contact_date,
+    method: row.method,
+    summary: row.summary || "",
+    result: row.result || "",
+    nextStep: row.next_step || "",
+    nextFollowUpDate: row.next_follow_up_date || "",
+    stageAfter: row.stage_after || "",
+    createdAt: row.created_at || new Date().toISOString()
+  });
+}
+
+async function loadCrmFromCloud() {
+  if (!supabaseClient || !supabaseSession?.user) return false;
+  const { data: accounts, error: accountError } = await supabaseClient
+    .from("crm_accounts")
+    .select("*")
+    .eq("user_id", supabaseSession.user.id)
+    .is("archived_at", null)
+    .order("updated_at", { ascending: false });
+  if (accountError) {
+    setSupabaseStatus(`CRM 載入失敗：${accountError.message}`);
+    return false;
+  }
+
+  const { data: products, error: productError } = await supabaseClient
+    .from("crm_account_products")
+    .select("*")
+    .eq("user_id", supabaseSession.user.id);
+  if (productError) {
+    setSupabaseStatus(`CRM 險種載入失敗：${productError.message}`);
+    return false;
+  }
+
+  const { data: visits, error: visitError } = await supabaseClient
+    .from("crm_visit_records")
+    .select("*")
+    .eq("user_id", supabaseSession.user.id)
+    .order("contact_date", { ascending: false });
+  if (visitError) {
+    setSupabaseStatus(`CRM 拜訪紀錄載入失敗：${visitError.message}`);
+    return false;
+  }
+
+  if (!accounts?.length && !visits?.length) return true;
+
+  const productsByAccount = new Map();
+  (products || []).forEach((product) => {
+    const list = productsByAccount.get(product.account_id) || [];
+    list.push(product.product_type);
+    productsByAccount.set(product.account_id, list);
+  });
+  const localAccounts = new Map(crmState.accounts.map((account) => [account.id, account]));
+  accounts.forEach((row) => {
+    localAccounts.set(row.id, cloudAccountToLocal(row, productsByAccount));
+  });
+  const localVisits = new Map(crmState.visits.map((visit) => [visit.id, visit]));
+  visits.forEach((row) => {
+    localVisits.set(row.id, cloudVisitToLocal(row));
+  });
+
+  crmState.accounts = [...localAccounts.values()];
+  crmState.visits = [...localVisits.values()];
+  crmState.updatedAt = new Date().toISOString();
+  localStorage.setItem(crmStorageKey, JSON.stringify(crmState));
+  if (!getCrmAccount()) selectedCrmAccountId = crmState.accounts[0]?.id || "";
+  renderCrm();
+  renderFunnel();
+  return true;
+}
+
+async function deleteCrmAccountFromCloud(accountId) {
+  if (!supabaseClient || !supabaseSession?.user || !accountId) return;
+  await supabaseClient
+    .from("crm_accounts")
+    .delete()
+    .eq("user_id", supabaseSession.user.id)
+    .eq("id", accountId);
+}
+
+async function deleteCrmVisitFromCloud(visitId) {
+  if (!supabaseClient || !supabaseSession?.user || !visitId) return;
+  await supabaseClient
+    .from("crm_visit_records")
+    .delete()
+    .eq("user_id", supabaseSession.user.id)
+    .eq("id", visitId);
 }
 
 async function loadPlanFromCloud() {
@@ -513,6 +1198,8 @@ function bindNavigation() {
       document.querySelector(`#${button.dataset.view}`).classList.add("active");
       updateStats();
       if (button.dataset.view === "lookback") renderLookback();
+      if (button.dataset.view === "crm") renderCrm();
+      if (button.dataset.view === "funnel") renderFunnel();
     });
   });
 }
@@ -961,6 +1648,611 @@ function renderWeeklyReflection() {
     });
     label.append(prompt, textarea);
     list.append(label);
+  });
+}
+
+function renderCrmStageOptions(select, includeAll = false) {
+  if (!select) return;
+  select.innerHTML = "";
+  if (includeAll) {
+    const all = document.createElement("option");
+    all.value = "all";
+    all.textContent = "全部階段";
+    select.append(all);
+  }
+  crmStages.forEach((stage) => {
+    const option = document.createElement("option");
+    option.value = stage;
+    option.textContent = stage;
+    select.append(option);
+  });
+}
+
+function renderCrmStats() {
+  const accountCount = document.querySelector("#crmAccountCount");
+  if (!accountCount) return;
+  accountCount.textContent = String(crmState.accounts.length);
+  document.querySelector("#crmFollowUpCount").textContent = String(crmState.accounts.filter(isCrmFollowUpDue).length);
+  document.querySelector("#crmRecentVisitCount").textContent = String(getRecentCrmVisits().length);
+  document.querySelector("#crmVisitCount").textContent = String(crmState.visits.length);
+}
+
+function createCrmMeta(account) {
+  return [account.location, account.category, account.occupation, account.policyStatus]
+    .filter(isFilled)
+    .join("｜") || "尚未補齊基本資料";
+}
+
+function compareCrmLocation(a, b) {
+  const left = isFilled(a) ? a : "zzzzzz";
+  const right = isFilled(b) ? b : "zzzzzz";
+  return left.localeCompare(right, "zh-Hant", { numeric: true, sensitivity: "base" });
+}
+
+function groupCrmAccountsByLocation(accounts) {
+  const groups = new Map();
+  accounts.forEach((account) => {
+    const key = isFilled(account.location) ? account.location : "未填所在地";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(account);
+  });
+  return [...groups.entries()]
+    .sort(([a], [b]) => {
+      if (a === "未填所在地") return 1;
+      if (b === "未填所在地") return -1;
+      return compareCrmLocation(a, b);
+    })
+    .map(([location, items]) => ({
+      location,
+      accounts: items.sort((a, b) => {
+        const followUpPriority = Number(isCrmFollowUpDue(b)) - Number(isCrmFollowUpDue(a));
+        if (followUpPriority) return followUpPriority;
+        const dateA = a.nextFollowUpDate || "9999-12-31";
+        const dateB = b.nextFollowUpDate || "9999-12-31";
+        if (dateA !== dateB) return dateA.localeCompare(dateB);
+        return a.name.localeCompare(b.name, "zh-Hant", { numeric: true, sensitivity: "base" });
+      })
+    }));
+}
+
+function createCrmAccountCard(account) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = account.id === selectedCrmAccountId ? "crm-account-card active" : "crm-account-card";
+  const latest = getCrmAccountLatestVisit(account.id);
+  const followUp = account.nextFollowUpDate ? `追蹤 ${account.nextFollowUpDate}` : "未排追蹤";
+  button.innerHTML = `
+    <span class="crm-account-card-top">
+      <strong></strong>
+      <em>${account.stage}</em>
+    </span>
+    <span class="crm-account-meta"></span>
+    <span class="crm-account-foot">${followUp}${latest ? `｜最近 ${latest.date}` : ""}</span>
+  `;
+  button.querySelector("strong").textContent = account.name;
+  button.querySelector(".crm-account-meta").textContent = createCrmMeta(account);
+  if (isCrmFollowUpDue(account)) button.classList.add("due");
+  button.addEventListener("click", () => {
+    selectedCrmAccountId = account.id;
+    renderCrm();
+  });
+  return button;
+}
+
+function renderCrmAccountList() {
+  const list = document.querySelector("#crmAccountList");
+  if (!list) return;
+  list.innerHTML = "";
+
+  const accounts = getFilteredCrmAccounts();
+  if (!accounts.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state crm-empty";
+    empty.textContent = crmState.accounts.length ? "沒有符合條件的客戶。" : "目前還沒有客戶，先新增第一位客戶。";
+    list.append(empty);
+    return;
+  }
+
+  if (!getCrmAccount() || !accounts.some((account) => account.id === selectedCrmAccountId)) {
+    selectedCrmAccountId = accounts[0].id;
+  }
+
+  groupCrmAccountsByLocation(accounts).forEach((group) => {
+    const details = document.createElement("details");
+    details.className = "crm-location-group";
+    details.open = expandedCrmLocations.has(group.location);
+    details.addEventListener("toggle", () => {
+      if (details.open) expandedCrmLocations.add(group.location);
+      else expandedCrmLocations.delete(group.location);
+    });
+
+    const summary = document.createElement("summary");
+    summary.className = "crm-location-summary";
+    const title = document.createElement("span");
+    title.textContent = group.location;
+    const count = document.createElement("strong");
+    count.textContent = `${group.accounts.length} 位`;
+    const arrow = document.createElement("i");
+    arrow.textContent = "›";
+    summary.append(title, count, arrow);
+
+    const content = document.createElement("div");
+    content.className = "crm-location-content";
+    group.accounts.forEach((account) => content.append(createCrmAccountCard(account)));
+    details.append(summary, content);
+    list.append(details);
+  });
+}
+
+function createCrmInfoItem(label, value) {
+  const item = document.createElement("p");
+  const name = document.createElement("span");
+  name.textContent = label;
+  const content = document.createElement("strong");
+  content.textContent = isFilled(value) ? value : "未填寫";
+  item.append(name, content);
+  return item;
+}
+
+function renderCrmVisitTimeline(account) {
+  const timeline = document.createElement("div");
+  timeline.className = "crm-timeline";
+  const visits = getCrmVisits(account.id);
+  if (!visits.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "還沒有拜訪紀錄。";
+    timeline.append(empty);
+    return timeline;
+  }
+
+  visits.forEach((visit) => {
+    const item = document.createElement("article");
+    item.className = "crm-visit-item";
+    const header = document.createElement("header");
+    const title = document.createElement("strong");
+    title.textContent = `${visit.date}｜${visit.method}${visit.stageAfter ? `｜${visit.stageAfter}` : ""}`;
+    const actions = document.createElement("div");
+    actions.className = "button-row compact-row";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "ghost-button compact-button";
+    edit.textContent = "編輯";
+    edit.addEventListener("click", () => renderCrmDetail(visit.id));
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "danger-button compact-button";
+    remove.textContent = "刪除";
+    remove.addEventListener("click", () => deleteCrmVisit(account.id, visit.id));
+    actions.append(edit, remove);
+    header.append(title, actions);
+    item.append(header);
+    [
+      ["內容", visit.summary],
+      ["結果", visit.result],
+      ["下一步", visit.nextStep],
+      ["下次追蹤", visit.nextFollowUpDate]
+    ].forEach(([label, value]) => {
+      if (!isFilled(value)) return;
+      const line = document.createElement("p");
+      line.textContent = `${label}：${value}`;
+      item.append(line);
+    });
+    timeline.append(item);
+  });
+  return timeline;
+}
+
+function renderCrmVisitForm(account, editingVisitId = "") {
+  const editingVisit = editingVisitId ? crmState.visits.find((visit) => visit.id === editingVisitId) : null;
+  const form = document.createElement("form");
+  form.className = "crm-visit-form";
+  form.innerHTML = `
+    <input name="visitId" type="hidden">
+    <div class="crm-form-grid">
+      <label class="field-row">
+        <span>拜訪日期</span>
+        <input name="date" type="date" required>
+      </label>
+      <label class="field-row">
+        <span>方式</span>
+        <select name="method"></select>
+      </label>
+      <label class="field-row">
+        <span>更新階段</span>
+        <select name="stageAfter"></select>
+      </label>
+      <label class="field-row">
+        <span>下次追蹤</span>
+        <input name="nextFollowUpDate" type="date">
+      </label>
+    </div>
+    <label class="field-row">
+      <span>這次談了什麼</span>
+      <textarea name="summary" rows="3" placeholder="記錄重點、需求、顧慮"></textarea>
+    </label>
+    <label class="field-row">
+      <span>客戶反應 / 結果</span>
+      <textarea name="result" rows="2" placeholder="這次互動後的判斷"></textarea>
+    </label>
+    <label class="field-row">
+      <span>下一步</span>
+      <input name="nextStep" type="text" placeholder="例如：補資料、約下次說明、送建議書">
+    </label>
+    <div class="button-row compact-row">
+      <button type="submit" class="primary-button">${editingVisit ? "儲存拜訪紀錄" : "新增拜訪紀錄"}</button>
+      <button name="cancelEdit" type="button" class="ghost-button" ${editingVisit ? "" : "hidden"}>取消編輯</button>
+    </div>
+  `;
+  form.elements.visitId.value = editingVisit?.id || "";
+  form.elements.date.value = editingVisit?.date || toDateInputValue(new Date());
+  crmMethods.forEach((method) => {
+    const option = document.createElement("option");
+    option.value = method;
+    option.textContent = method;
+    form.elements.method.append(option);
+  });
+  renderCrmStageOptions(form.elements.stageAfter);
+  form.elements.method.value = editingVisit?.method || "面訪";
+  form.elements.stageAfter.value = editingVisit?.stageAfter || account.stage;
+  form.elements.summary.value = editingVisit?.summary || "";
+  form.elements.result.value = editingVisit?.result || "";
+  form.elements.nextStep.value = editingVisit?.nextStep || account.nextStep || "";
+  form.elements.nextFollowUpDate.value = editingVisit?.nextFollowUpDate || account.nextFollowUpDate || "";
+  form.elements.cancelEdit.addEventListener("click", () => renderCrmDetail());
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveCrmVisit(account.id, new FormData(form));
+    form.reset();
+  });
+  return form;
+}
+
+function renderCrmDetail(editingVisitId = "") {
+  const detail = document.querySelector("#crmDetail");
+  if (!detail) return;
+  detail.innerHTML = "";
+  const account = getCrmAccount();
+  if (!account) {
+    const empty = document.createElement("div");
+    empty.className = "crm-detail-empty";
+    empty.innerHTML = "<h3>選擇或新增一位客戶</h3><p>客戶詳情、拜訪紀錄與下一步會顯示在這裡。</p>";
+    detail.append(empty);
+    return;
+  }
+
+  const header = document.createElement("header");
+  header.className = "crm-detail-header";
+  const title = document.createElement("div");
+  const name = document.createElement("h3");
+  name.textContent = account.name;
+  const meta = document.createElement("p");
+  meta.textContent = createCrmMeta(account);
+  title.append(name, meta);
+  const actions = document.createElement("div");
+  actions.className = "button-row compact-row";
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "ghost-button";
+  edit.textContent = "編輯客戶";
+  edit.addEventListener("click", () => openCrmAccountEditor(account.id));
+  actions.append(edit);
+  header.append(title, actions);
+
+  const status = document.createElement("div");
+  status.className = "crm-status-strip";
+  status.append(
+    createCrmInfoItem("目前階段", account.stage),
+    createCrmInfoItem("下一步", account.nextStep),
+    createCrmInfoItem("下次追蹤", account.nextFollowUpDate),
+    createCrmInfoItem("最近接觸", account.lastContactDate)
+  );
+
+  const profile = document.createElement("section");
+  profile.className = "crm-profile-grid";
+  profile.append(
+    createCrmInfoItem("所在地", account.location),
+    createCrmInfoItem("分類", account.category),
+    createCrmInfoItem("生日", account.birthday),
+    createCrmInfoItem("職業", account.occupation),
+    createCrmInfoItem("稅前收入", account.pretaxIncome),
+    createCrmInfoItem("已有險種", account.policies),
+    createCrmInfoItem("保單狀態", account.policyStatus),
+    createCrmInfoItem("舊表見面次數", Number.isFinite(account.legacyVisitCount) ? `${account.legacyVisitCount} 次` : ""),
+    createCrmInfoItem("客戶背景", account.background),
+    createCrmInfoItem("備註", account.notes)
+  );
+
+  const visitBlock = document.createElement("section");
+  visitBlock.className = "crm-section";
+  const visitTitle = document.createElement("h3");
+  visitTitle.textContent = "新增拜訪紀錄";
+  visitTitle.textContent = editingVisitId ? "編輯拜訪紀錄" : "新增拜訪紀錄";
+  visitBlock.append(visitTitle, renderCrmVisitForm(account, editingVisitId));
+
+  const timelineBlock = document.createElement("section");
+  timelineBlock.className = "crm-section";
+  const timelineTitle = document.createElement("h3");
+  timelineTitle.textContent = "歷史拜訪";
+  timelineBlock.append(timelineTitle, renderCrmVisitTimeline(account));
+
+  detail.append(header, status, profile, visitBlock, timelineBlock);
+}
+
+function renderCrm() {
+  if (!document.querySelector("#crmAccountList")) return;
+  renderCrmStats();
+  renderCrmStageOptions(document.querySelector("#crmStageFilter"), true);
+  document.querySelector("#crmStageFilter").value = selectedCrmStageFilter;
+  renderCrmAccountList();
+  renderCrmDetail();
+}
+
+function formatPercent(value) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function renderFunnel() {
+  const stageList = document.querySelector("#funnelStageList");
+  if (!stageList) return;
+  document.querySelector("#funnelYear").value = selectedFunnelYear;
+  document.querySelector("#funnelHalf").value = selectedFunnelHalf;
+
+  const { events, byStage } = getFunnelSummary();
+  const total = events.length;
+  const closed = byStage["成交"]?.length || 0;
+  const contacted = byStage["初步聯繫"]?.length || 0;
+  const largest = crmFunnelStages
+    .map((stage) => ({ stage, count: byStage[stage]?.length || 0 }))
+    .filter((item) => item.stage !== "成交")
+    .sort((a, b) => b.count - a.count)[0];
+
+  document.querySelector("#funnelTotalCount").textContent = String(total);
+  document.querySelector("#funnelClosedCount").textContent = String(closed);
+  document.querySelector("#funnelCloseRate").textContent = contacted ? formatPercent(closed / contacted) : "0%";
+  document.querySelector("#funnelLargestStage").textContent = largest?.count ? largest.stage : "-";
+
+  const max = Math.max(...crmFunnelStages.map((stage) => byStage[stage]?.length || 0), 1);
+  stageList.innerHTML = "";
+  crmFunnelStages.forEach((stage) => {
+    const count = byStage[stage]?.length || 0;
+    const ratio = total ? count / total : 0;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = selectedFunnelStage === stage ? "funnel-stage active" : "funnel-stage";
+    button.innerHTML = `
+      <span class="funnel-stage-head">
+        <strong>${stage}</strong>
+        <em>${count} 次</em>
+      </span>
+      <span class="funnel-bar"><i style="width: ${Math.max((count / max) * 100, count ? 8 : 0)}%"></i></span>
+      <span class="funnel-stage-meta">${getFunnelRange().label}｜實際紀錄 ${formatPercent(ratio)}</span>
+    `;
+    button.addEventListener("click", () => {
+      selectedFunnelStage = selectedFunnelStage === stage ? "all" : stage;
+      renderFunnel();
+    });
+    stageList.append(button);
+  });
+
+  renderFunnelAccounts(byStage);
+}
+
+function renderFunnelAccounts(byStage = getFunnelSummary().byStage) {
+  const list = document.querySelector("#funnelAccountList");
+  if (!list) return;
+  const title = document.querySelector("#funnelAccountTitle");
+  const events = selectedFunnelStage === "all"
+    ? getFunnelSummary().events
+    : (byStage[selectedFunnelStage] || []);
+  title.textContent = selectedFunnelStage === "all" ? "全部漏斗紀錄" : `「${selectedFunnelStage}」紀錄`;
+
+  list.innerHTML = "";
+  if (!events.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state crm-empty";
+    empty.textContent = "這個區間沒有符合條件的客戶。";
+    list.append(empty);
+    return;
+  }
+
+  events
+    .slice()
+    .sort((a, b) => (
+      b.date.localeCompare(a.date) ||
+      crmFunnelStages.indexOf(a.stage) - crmFunnelStages.indexOf(b.stage) ||
+      a.account.name.localeCompare(b.account.name, "zh-Hant", { numeric: true })
+    ))
+    .forEach((event) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "funnel-account-card";
+      const account = event.account;
+      const summary = event.visit?.summary || event.visit?.result || createCrmMeta(account);
+      card.innerHTML = `
+        <span>
+          <strong></strong>
+          <em>${event.stage}</em>
+        </span>
+        <p></p>
+        <small>${event.date || "未記錄"}｜${event.label || "未填方式"}</small>
+      `;
+      card.querySelector("strong").textContent = account.name;
+      card.querySelector("p").textContent = summary;
+      card.addEventListener("click", () => {
+        selectedCrmAccountId = account.id;
+        document.querySelectorAll(".nav-button").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
+        document.querySelector('[data-view="crm"]').classList.add("active");
+        document.querySelector("#crm").classList.add("active");
+        renderCrm();
+      });
+      list.append(card);
+    });
+}
+
+function openCrmAccountEditor(accountId = "") {
+  const account = accountId ? getCrmAccount(accountId) : null;
+  renderCrmStageOptions(document.querySelector("#crmAccountStage"));
+  document.querySelector("#crmAccountDialogTitle").textContent = account ? "編輯客戶" : "新增客戶";
+  document.querySelector("#crmAccountId").value = account?.id || "";
+  document.querySelector("#crmAccountName").value = account?.name || "";
+  document.querySelector("#crmAccountStage").value = account?.stage || "尚未聯絡";
+  document.querySelector("#crmAccountLocation").value = account?.location || "";
+  document.querySelector("#crmAccountCategory").value = account?.category || "";
+  document.querySelector("#crmAccountBirthday").value = account?.birthday || "";
+  document.querySelector("#crmAccountOccupation").value = account?.occupation || "";
+  document.querySelector("#crmAccountPolicies").value = account?.policies || "";
+  document.querySelector("#crmAccountPolicyStatus").value = account?.policyStatus || "";
+  document.querySelector("#crmAccountBackground").value = account?.background || "";
+  document.querySelector("#crmAccountNextStep").value = account?.nextStep || "";
+  document.querySelector("#crmAccountNextFollowUp").value = account?.nextFollowUpDate || "";
+  document.querySelector("#crmAccountNotes").value = account?.notes || "";
+  document.querySelector("#deleteCrmAccountBtn").hidden = !account;
+  document.querySelector("#crmAccountDialog").showModal();
+}
+
+function closeCrmAccountEditor() {
+  document.querySelector("#crmAccountDialog").close();
+}
+
+function saveCrmAccount() {
+  const id = document.querySelector("#crmAccountId").value || crypto.randomUUID();
+  const name = document.querySelector("#crmAccountName").value.trim();
+  if (!name) {
+    alert("請先輸入客戶姓名。");
+    return;
+  }
+
+  const existing = crmState.accounts.find((account) => account.id === id);
+  const account = normalizeCrmAccount({
+    ...(existing || {}),
+    id,
+    name,
+    stage: document.querySelector("#crmAccountStage").value,
+    location: document.querySelector("#crmAccountLocation").value.trim(),
+    category: document.querySelector("#crmAccountCategory").value.trim(),
+    birthday: document.querySelector("#crmAccountBirthday").value,
+    occupation: document.querySelector("#crmAccountOccupation").value.trim(),
+    policies: document.querySelector("#crmAccountPolicies").value.trim(),
+    policyStatus: document.querySelector("#crmAccountPolicyStatus").value.trim(),
+    background: document.querySelector("#crmAccountBackground").value.trim(),
+    nextStep: document.querySelector("#crmAccountNextStep").value.trim(),
+    nextFollowUpDate: document.querySelector("#crmAccountNextFollowUp").value,
+    notes: document.querySelector("#crmAccountNotes").value.trim(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const index = crmState.accounts.findIndex((item) => item.id === id);
+  if (index >= 0) crmState.accounts[index] = account;
+  else crmState.accounts.push(account);
+  selectedCrmAccountId = id;
+  closeCrmAccountEditor();
+  saveCrmState();
+}
+
+function deleteCrmAccount() {
+  const id = document.querySelector("#crmAccountId").value;
+  const account = getCrmAccount(id);
+  if (!account) return;
+  if (!confirm(`確定刪除 ${account.name}？這也會刪除他的拜訪紀錄。`)) return;
+  deleteCrmAccountFromCloud(id);
+  crmState.accounts = crmState.accounts.filter((item) => item.id !== id);
+  crmState.visits = crmState.visits.filter((visit) => visit.accountId !== id);
+  selectedCrmAccountId = crmState.accounts[0]?.id || "";
+  closeCrmAccountEditor();
+  saveCrmState();
+}
+
+function deleteCrmVisit(accountId, visitId) {
+  const account = getCrmAccount(accountId);
+  const visit = crmState.visits.find((item) => item.id === visitId);
+  if (!account || !visit) return;
+  if (!confirm("確定刪除這筆拜訪紀錄？")) return;
+
+  deleteCrmVisitFromCloud(visitId);
+  crmState.visits = crmState.visits.filter((item) => item.id !== visitId);
+  applyLatestVisitToCrmAccount(account);
+  saveCrmState();
+}
+
+function saveCrmVisit(accountId, formData) {
+  const account = getCrmAccount(accountId);
+  if (!account) return;
+  const visitId = String(formData.get("visitId") || "");
+  const existingVisit = crmState.visits.find((item) => item.id === visitId);
+  const visit = normalizeCrmVisit({
+    id: visitId || crypto.randomUUID(),
+    accountId,
+    date: formData.get("date"),
+    method: formData.get("method"),
+    stageAfter: formData.get("stageAfter"),
+    summary: String(formData.get("summary") || "").trim(),
+    result: String(formData.get("result") || "").trim(),
+    nextStep: String(formData.get("nextStep") || "").trim(),
+    nextFollowUpDate: formData.get("nextFollowUpDate"),
+    createdAt: existingVisit?.createdAt
+  });
+  const index = crmState.visits.findIndex((item) => item.id === visit.id);
+  if (index >= 0) crmState.visits[index] = visit;
+  else crmState.visits.push(visit);
+
+  applyLatestVisitToCrmAccount(account, account.stage);
+  saveCrmState();
+}
+
+function bindCrmActions() {
+  document.querySelector("#addCrmAccountBtn").addEventListener("click", () => openCrmAccountEditor());
+  document.querySelector("#importCrmLegacyBtn").addEventListener("click", () => {
+    setCrmImportStatus("會依表頭對應舊欄位；登入 Supabase 後會同步寫入 CRM 資料表。");
+    document.querySelector("#crmImportDialog").showModal();
+  });
+  document.querySelector("#cancelCrmImportBtn").addEventListener("click", () => {
+    document.querySelector("#crmImportDialog").close();
+  });
+  document.querySelector("#crmImportForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const file = document.querySelector("#crmImportFile").files[0];
+    const pasted = document.querySelector("#crmImportText").value;
+    const text = file ? await file.text() : pasted;
+    const result = importLegacyCrmRows(text, {
+      sourceType: file ? "csv" : "pasted_table",
+      sourceName: document.querySelector("#crmImportSourceName").value.trim(),
+      sourceUrl: document.querySelector("#crmImportSourceUrl").value.trim()
+    });
+    if (!result.imported) {
+      setCrmImportStatus(`匯入失敗：${result.reason || "沒有可匯入的客戶資料。"}`);
+      return;
+    }
+    const cloudMessage = supabaseSession?.user ? "，並已加入 Supabase 同步" : "；尚未登入 Supabase，暫存在此瀏覽器";
+    setCrmImportStatus(`已匯入 ${result.imported} 位客戶，略過 ${result.skipped} 列${cloudMessage}。`);
+    document.querySelector("#crmImportText").value = "";
+    document.querySelector("#crmImportFile").value = "";
+    renderCrm();
+    if (supabaseSession?.user) await saveCrmToCloud(true);
+  });
+  document.querySelector("#crmSearch").addEventListener("input", renderCrm);
+  document.querySelector("#crmStageFilter").addEventListener("change", (event) => {
+    selectedCrmStageFilter = event.target.value;
+    renderCrm();
+  });
+  document.querySelector("#crmAccountForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveCrmAccount();
+  });
+  document.querySelector("#cancelCrmAccountBtn").addEventListener("click", closeCrmAccountEditor);
+  document.querySelector("#deleteCrmAccountBtn").addEventListener("click", deleteCrmAccount);
+}
+
+function bindFunnelActions() {
+  document.querySelector("#funnelYear").addEventListener("input", (event) => {
+    selectedFunnelYear = Number(event.target.value) || new Date().getFullYear();
+    renderFunnel();
+  });
+  document.querySelector("#funnelHalf").addEventListener("change", (event) => {
+    selectedFunnelHalf = event.target.value;
+    renderFunnel();
   });
 }
 
@@ -1470,6 +2762,15 @@ function bindSettings() {
     setSupabaseStatus(`登入連結已寄到 ${settings.email}。請用同一個瀏覽器開啟信中的連結。`);
   });
 
+  document.querySelector("#syncCrmToCloudBtn").addEventListener("click", async () => {
+    if (!supabaseClient || !supabaseSession?.user) {
+      updateSupabaseStatus("請先登入 Supabase，再同步 CRM 到雲端。");
+      return;
+    }
+    setSupabaseStatus("正在同步 CRM 到 Supabase...");
+    await saveCrmToCloud(true);
+  });
+
   document.querySelector("#syncFromCloudBtn").addEventListener("click", loadPlanFromCloud);
   document.querySelector("#signOutBtn").addEventListener("click", async () => {
     if (supabaseClient) await supabaseClient.auth.signOut();
@@ -1561,6 +2862,8 @@ function bindActions() {
   });
   bindVictoryActions();
   bindLookbackActions();
+  bindCrmActions();
+  bindFunnelActions();
   document.querySelector("#scheduleForm").addEventListener("submit", (event) => {
     event.preventDefault();
     saveScheduleEvent();
@@ -1628,6 +2931,8 @@ function renderAll() {
   renderVictories();
   renderWeeklyReflection();
   renderLookback();
+  renderCrm();
+  renderFunnel();
   renderImportantInputs();
   renderSchedule();
   renderRenewal();
