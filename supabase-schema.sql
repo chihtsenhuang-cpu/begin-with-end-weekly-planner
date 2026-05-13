@@ -85,10 +85,14 @@ create table if not exists public.crm_visit_records (
   result text,
   next_step text,
   next_follow_up_date date,
+  pretax_income text,
   stage_after text,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table public.crm_visit_records
+add column if not exists pretax_income text;
 
 create table if not exists public.crm_stage_history (
   id uuid primary key default gen_random_uuid(),

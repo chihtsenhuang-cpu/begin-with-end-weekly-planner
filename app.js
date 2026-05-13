@@ -489,6 +489,7 @@ function normalizeCrmVisit(visit) {
     result: visit?.result || "",
     nextStep: visit?.nextStep || "",
     nextFollowUpDate: visit?.nextFollowUpDate || "",
+    pretaxIncome: visit?.pretaxIncome || "",
     stageAfter: crmStages.includes(stageAfter) ? stageAfter : "",
     createdAt: visit?.createdAt || new Date().toISOString()
   };
@@ -523,6 +524,37 @@ function getCrmFaceToFaceVisitCount(accountId) {
 function getCrmMeetingCount(account) {
   const importedCount = Number.isFinite(account?.legacyVisitCount) ? account.legacyVisitCount : 0;
   return importedCount + getCrmFaceToFaceVisitCount(account.id);
+}
+
+function parseCrmMoney(value) {
+  const normalized = String(value || "")
+    .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/,/g, "")
+    .replace(/[^\d.-]/g, "");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatCrmMoney(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return "0";
+  return new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(number);
+}
+
+function getCrmVisitPretaxIncomeSum(accountId) {
+  return crmState.visits
+    .filter((visit) => visit.accountId === accountId)
+    .reduce((sum, visit) => sum + parseCrmMoney(visit.pretaxIncome), 0);
+}
+
+function getCrmPretaxIncomeTotal(account) {
+  return parseCrmMoney(account?.pretaxIncome) + getCrmVisitPretaxIncomeSum(account.id);
+}
+
+function getCrmMeetingEfficiency(account) {
+  const meetingCount = getCrmMeetingCount(account);
+  if (!meetingCount) return 0;
+  return getCrmPretaxIncomeTotal(account) / meetingCount;
 }
 
 function getCrmAccountImportedStage(account) {
@@ -959,6 +991,7 @@ function mapCrmVisitToCloud(visit) {
     result: visit.result || null,
     next_step: visit.nextStep || null,
     next_follow_up_date: visit.nextFollowUpDate || null,
+    pretax_income: visit.pretaxIncome || null,
     stage_after: visit.stageAfter || null,
     created_at: visit.createdAt,
     updated_at: new Date().toISOString()
@@ -1086,6 +1119,7 @@ function cloudVisitToLocal(row) {
     result: row.result || "",
     nextStep: row.next_step || "",
     nextFollowUpDate: row.next_follow_up_date || "",
+    pretaxIncome: row.pretax_income || "",
     stageAfter: row.stage_after || "",
     createdAt: row.created_at || new Date().toISOString()
   });
@@ -1840,7 +1874,8 @@ function renderCrmVisitTimeline(account) {
       ["內容", visit.summary],
       ["結果", visit.result],
       ["下一步", visit.nextStep],
-      ["下次追蹤", visit.nextFollowUpDate]
+      ["下次追蹤", visit.nextFollowUpDate],
+      ["稅前收入", visit.pretaxIncome ? formatCrmMoney(parseCrmMoney(visit.pretaxIncome)) : ""]
     ].forEach(([label, value]) => {
       if (!isFilled(value)) return;
       const line = document.createElement("p");
@@ -1870,6 +1905,10 @@ function renderCrmVisitForm(account, editingVisitId = "") {
       <label class="field-row">
         <span>更新階段</span>
         <select name="stageAfter"></select>
+      </label>
+      <label class="field-row">
+        <span>稅前收入</span>
+        <input name="pretaxIncome" type="text" inputmode="decimal" placeholder="成交佣金">
       </label>
       <label class="field-row">
         <span>下次追蹤</span>
@@ -1908,6 +1947,7 @@ function renderCrmVisitForm(account, editingVisitId = "") {
   form.elements.result.value = editingVisit?.result || "";
   form.elements.nextStep.value = editingVisit?.nextStep || account.nextStep || "";
   form.elements.nextFollowUpDate.value = editingVisit?.nextFollowUpDate || account.nextFollowUpDate || "";
+  form.elements.pretaxIncome.value = editingVisit?.pretaxIncome || "";
   form.elements.cancelEdit.addEventListener("click", () => renderCrmDetail());
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1954,7 +1994,8 @@ function renderCrmDetail(editingVisitId = "") {
     createCrmInfoItem("目前階段", account.stage),
     createCrmInfoItem("下一步", account.nextStep),
     createCrmInfoItem("下次追蹤", account.nextFollowUpDate),
-    createCrmInfoItem("最近接觸", account.lastContactDate)
+    createCrmInfoItem("最近接觸", account.lastContactDate),
+    createCrmInfoItem("面談效益", getCrmMeetingCount(account) ? formatCrmMoney(getCrmMeetingEfficiency(account)) : "")
   );
 
   const profile = document.createElement("section");
@@ -1968,7 +2009,7 @@ function renderCrmDetail(editingVisitId = "") {
     createCrmInfoItem("保單狀態", account.policyStatus),
     createCrmInfoItem("客戶背景", account.background),
     createCrmInfoItem("備註", account.notes),
-    createCrmInfoItem("稅前收入", account.pretaxIncome),
+    createCrmInfoItem("稅前收入", formatCrmMoney(getCrmPretaxIncomeTotal(account))),
     createCrmInfoItem("見面次數", `${getCrmMeetingCount(account)} 次`)
   );
 
@@ -2204,6 +2245,7 @@ function saveCrmVisit(accountId, formData) {
     result: String(formData.get("result") || "").trim(),
     nextStep: String(formData.get("nextStep") || "").trim(),
     nextFollowUpDate: formData.get("nextFollowUpDate"),
+    pretaxIncome: String(formData.get("pretaxIncome") || "").trim(),
     createdAt: existingVisit?.createdAt
   });
   const index = crmState.visits.findIndex((item) => item.id === visit.id);
