@@ -1292,13 +1292,23 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 7px 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: #fbfcfa;
   font-size: 14px;
+  line-height: 1.2;
+  white-space: nowrap;
   color: var(--ink);
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.crm-stage-chip input {
+  width: auto;
+  flex: none;
+  margin: 0;
+  padding: 0;
 }
 
 .crm-stage-chip:has(input:checked) {
