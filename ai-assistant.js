@@ -145,11 +145,11 @@ function getReminderInsuranceAgeBoundary() {
 function getReminderServicePending() {
   const results = [];
   crmState.visits.forEach((visit) => {
-    if (visit.stageAfter !== "保服" && visit.stageAfter !== "理賠") return;
-    if (visit.handled === true) return;
     const account = crmState.accounts.find((a) => a.id === visit.accountId);
     if (!account) return;
-    results.push({ account, visit });
+    (visit.stagesAfter || [])
+      .filter((stage) => (stage === "保服" || stage === "理賠") && !(visit.handledStages || []).includes(stage))
+      .forEach((stage) => results.push({ account, visit, stage }));
   });
   return results.sort((a, b) => (b.visit.date || "").localeCompare(a.visit.date || ""));
 }
@@ -273,7 +273,7 @@ function renderReminders() {
     "保服／理賠待處理",
     service,
     "沒有未處理的保服／理賠紀錄。",
-    ({ account, visit }) => buildAccountRow(account, `${visit.stageAfter}｜${visit.date}`)
+    ({ account, visit, stage }) => buildAccountRow(account, `${stage}｜${visit.date}`)
   ));
 }
 

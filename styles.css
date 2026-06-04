@@ -1278,6 +1278,35 @@ button {
   font-size: 13px;
 }
 
+.crm-stage-field {
+  grid-column: 1 / -1;
+}
+
+.crm-stage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crm-stage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbfcfa;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.crm-stage-chip:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(45, 106, 95, 0.12);
+  color: var(--accent-strong);
+}
+
 .crm-policies-add {
   display: flex;
   gap: 8px;

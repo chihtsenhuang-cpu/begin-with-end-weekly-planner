@@ -40,6 +40,7 @@ const crmStages = ["尚未聯絡", "初步聯繫", "財務＆保單分析", "說
 const crmFunnelStages = ["尚未聯絡", "初步聯繫", "財務＆保單分析", "說明與口頭", "建議書", "成交"];
 const crmFunnelExtraStages = ["轉介紹"];
 const crmFunnelAllStages = [...crmFunnelStages, ...crmFunnelExtraStages];
+const crmServiceStages = ["保服", "理賠"];
 const crmMethods = ["電話", "LINE", "面訪", "視訊", "Email", "其他"];
 const crmLegacyStageHeaders = ["尚未聯絡", "初步聯繫", "財務 (保單) 分析", "說明＆口頭", "建議書", "成交", "轉介紹", "轉介紹成交", "保服", "理賠"];
 const crmLegacyColumns = {
@@ -480,8 +481,26 @@ function normalizeCrmAccount(account) {
   };
 }
 
+function normalizeCrmStageList(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  const valid = list.map(normalizeCrmStage).filter((stage) => crmStages.includes(stage));
+  return [...new Set(valid)].sort((a, b) => crmStages.indexOf(a) - crmStages.indexOf(b));
+}
+
+function getVisitPrimaryStage(visit) {
+  return (visit?.stagesAfter || []).at(-1) || "";
+}
+
 function normalizeCrmVisit(visit) {
-  const stageAfter = normalizeCrmStage(visit?.stageAfter);
+  const stagesAfter = normalizeCrmStageList(visit?.stagesAfter ?? visit?.stageAfter);
+  const handledSource = Array.isArray(visit?.handledStages)
+    ? visit.handledStages
+    : visit?.handled === true
+      ? stagesAfter
+      : [];
+  const handledStages = normalizeCrmStageList(handledSource).filter(
+    (stage) => crmServiceStages.includes(stage) && stagesAfter.includes(stage)
+  );
   return {
     id: visit?.id || crypto.randomUUID(),
     accountId: visit?.accountId || "",
@@ -492,8 +511,8 @@ function normalizeCrmVisit(visit) {
     nextStep: visit?.nextStep || "",
     nextFollowUpDate: visit?.nextFollowUpDate || "",
     pretaxIncome: visit?.pretaxIncome || "",
-    stageAfter: crmStages.includes(stageAfter) ? stageAfter : "",
-    handled: visit?.handled === true,
+    stagesAfter,
+    handledStages,
     createdAt: visit?.createdAt || new Date().toISOString()
   };
 }
@@ -527,6 +546,15 @@ function getCrmFaceToFaceVisitCount(accountId) {
 function getCrmMeetingCount(account) {
   const importedCount = Number.isFinite(account?.legacyVisitCount) ? account.legacyVisitCount : 0;
   return importedCount + getCrmFaceToFaceVisitCount(account.id);
+}
+
+function getCrmVisitServiceStages(visit) {
+  return (visit?.stagesAfter || []).filter((stage) => crmServiceStages.includes(stage));
+}
+
+function isCrmVisitFullyHandled(visit) {
+  const serviceStages = getCrmVisitServiceStages(visit);
+  return serviceStages.length > 0 && serviceStages.every((stage) => visit.handledStages.includes(stage));
 }
 
 function parseCrmMoney(value) {
@@ -568,7 +596,7 @@ function getCrmAccountImportedStage(account) {
 function applyLatestVisitToCrmAccount(account, fallbackStage = "") {
   const latest = getCrmAccountLatestVisit(account.id);
   if (latest) {
-    account.stage = latest.stageAfter || account.stage;
+    account.stage = getVisitPrimaryStage(latest) || account.stage;
     account.nextStep = latest.nextStep;
     account.nextFollowUpDate = latest.nextFollowUpDate;
     account.lastContactDate = latest.date;
@@ -637,18 +665,22 @@ function getFunnelEvents() {
   const accountsWithVisits = new Set();
   crmState.visits.forEach((visit) => {
     accountsWithVisits.add(visit.accountId);
-    if (!crmFunnelAllStages.includes(visit.stageAfter) || !isDateInFunnelRange(visit.date)) return;
+    if (!isDateInFunnelRange(visit.date)) return;
     const account = getCrmAccount(visit.accountId);
     if (!account) return;
-    events.push({
-      id: visit.id,
-      account,
-      visit,
-      stage: visit.stageAfter,
-      date: visit.date,
-      label: visit.method,
-      source: "visit"
-    });
+    visit.stagesAfter
+      .filter((stage) => crmFunnelAllStages.includes(stage))
+      .forEach((stage) => {
+        events.push({
+          id: `${visit.id}:${stage}`,
+          account,
+          visit,
+          stage,
+          date: visit.date,
+          label: visit.method,
+          source: "visit"
+        });
+      });
   });
 
   crmState.accounts.forEach((account) => {
@@ -995,8 +1027,9 @@ function mapCrmVisitToCloud(visit) {
     next_step: visit.nextStep || null,
     next_follow_up_date: visit.nextFollowUpDate || null,
     pretax_income: visit.pretaxIncome || null,
-    stage_after: visit.stageAfter || null,
-    handled: visit.handled === true,
+    stage_after: visit.stagesAfter.join(",") || null,
+    handled_stages: visit.handledStages.join(",") || null,
+    handled: isCrmVisitFullyHandled(visit),
     created_at: visit.createdAt,
     updated_at: new Date().toISOString()
   };
@@ -1124,8 +1157,12 @@ function cloudVisitToLocal(row) {
     nextStep: row.next_step || "",
     nextFollowUpDate: row.next_follow_up_date || "",
     pretaxIncome: row.pretax_income || "",
-    stageAfter: row.stage_after || "",
-    handled: row.handled === true,
+    stagesAfter: String(row.stage_after || "").split(","),
+    handledStages: row.handled_stages != null
+      ? String(row.handled_stages).split(",")
+      : row.handled === true
+        ? String(row.stage_after || "").split(",")
+        : [],
     createdAt: row.created_at || new Date().toISOString()
   });
 }
@@ -1717,6 +1754,24 @@ function renderCrmStageOptions(select, includeAll = false) {
   });
 }
 
+function renderCrmStageCheckboxes(container, selectedStages = []) {
+  if (!container) return;
+  container.innerHTML = "";
+  crmStages.forEach((stage) => {
+    const label = document.createElement("label");
+    label.className = "crm-stage-chip";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.name = "stageAfter";
+    checkbox.value = stage;
+    checkbox.checked = selectedStages.includes(stage);
+    const text = document.createElement("span");
+    text.textContent = stage;
+    label.append(checkbox, text);
+    container.append(label);
+  });
+}
+
 function renderCrmStats() {
   const accountCount = document.querySelector("#crmAccountCount");
   if (!accountCount) return;
@@ -1860,7 +1915,8 @@ function renderCrmVisitTimeline(account) {
     item.className = "crm-visit-item";
     const header = document.createElement("header");
     const title = document.createElement("strong");
-    title.textContent = `${visit.date}｜${visit.method}${visit.stageAfter ? `｜${visit.stageAfter}` : ""}`;
+    const stageLabel = visit.stagesAfter.join("、");
+    title.textContent = `${visit.date}｜${visit.method}${stageLabel ? `｜${stageLabel}` : ""}`;
     const actions = document.createElement("div");
     actions.className = "button-row compact-row";
     const edit = document.createElement("button");
@@ -1888,27 +1944,30 @@ function renderCrmVisitTimeline(account) {
       line.textContent = `${label}：${value}`;
       item.append(line);
     });
-    if (visit.stageAfter === "保服" || visit.stageAfter === "理賠") {
+    getCrmVisitServiceStages(visit).forEach((stage) => {
       const handledRow = document.createElement("label");
       handledRow.className = "visit-handled-row";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = visit.handled === true;
-      checkbox.addEventListener("change", () => toggleCrmVisitHandled(visit.id, checkbox.checked));
+      checkbox.checked = visit.handledStages.includes(stage);
+      checkbox.addEventListener("change", () => toggleCrmVisitHandled(visit.id, stage, checkbox.checked));
       const span = document.createElement("span");
-      span.textContent = `已處理完此${visit.stageAfter}`;
+      span.textContent = `已處理完此${stage}`;
       handledRow.append(checkbox, span);
       item.append(handledRow);
-    }
+    });
     timeline.append(item);
   });
   return timeline;
 }
 
-function toggleCrmVisitHandled(visitId, handled) {
+function toggleCrmVisitHandled(visitId, stage, handled) {
   const visit = crmState.visits.find((v) => v.id === visitId);
   if (!visit) return;
-  visit.handled = handled === true;
+  const handledSet = new Set(visit.handledStages);
+  if (handled === true) handledSet.add(stage);
+  else handledSet.delete(stage);
+  visit.handledStages = crmStages.filter((s) => handledSet.has(s));
   saveCrmState();
   if (typeof renderReminders === "function") renderReminders();
 }
@@ -1929,13 +1988,13 @@ function renderCrmVisitForm(account, editingVisitId = "") {
         <select name="method"></select>
       </label>
       <label class="field-row">
-        <span>更新階段</span>
-        <select name="stageAfter"></select>
-      </label>
-      <label class="field-row">
         <span>税前收入</span>
         <input name="pretaxIncome" type="text" inputmode="decimal" placeholder="成交佣金">
       </label>
+      <div class="field-row crm-stage-field">
+        <span>更新階段（可複選）</span>
+        <div class="crm-stage-list" role="group" aria-label="更新階段"></div>
+      </div>
       <label class="field-row">
         <span>下次追蹤</span>
         <input name="nextFollowUpDate" type="date">
@@ -1966,9 +2025,13 @@ function renderCrmVisitForm(account, editingVisitId = "") {
     option.textContent = method;
     form.elements.method.append(option);
   });
-  renderCrmStageOptions(form.elements.stageAfter);
+  const initialStages = editingVisit?.stagesAfter?.length
+    ? editingVisit.stagesAfter
+    : account.stage
+      ? [account.stage]
+      : [];
+  renderCrmStageCheckboxes(form.querySelector(".crm-stage-list"), initialStages);
   form.elements.method.value = editingVisit?.method || "面訪";
-  form.elements.stageAfter.value = editingVisit?.stageAfter || account.stage;
   form.elements.summary.value = editingVisit?.summary || "";
   form.elements.result.value = editingVisit?.result || "";
   form.elements.nextStep.value = editingVisit?.nextStep || account.nextStep || "";
@@ -2422,12 +2485,13 @@ function saveCrmVisit(accountId, formData) {
     accountId,
     date: formData.get("date"),
     method: formData.get("method"),
-    stageAfter: formData.get("stageAfter"),
+    stagesAfter: formData.getAll("stageAfter"),
     summary: String(formData.get("summary") || "").trim(),
     result: String(formData.get("result") || "").trim(),
     nextStep: String(formData.get("nextStep") || "").trim(),
     nextFollowUpDate: formData.get("nextFollowUpDate"),
     pretaxIncome: String(formData.get("pretaxIncome") || "").trim(),
+    handledStages: existingVisit?.handledStages,
     createdAt: existingVisit?.createdAt
   });
   const index = crmState.visits.findIndex((item) => item.id === visit.id);
