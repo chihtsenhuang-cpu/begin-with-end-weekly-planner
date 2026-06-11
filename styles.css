@@ -1599,14 +1599,35 @@ button {
 
 .caddie-assistant p,
 .caddie-assistant ul,
-.caddie-assistant ol {
+.caddie-assistant ol,
+.caddie-assistant table {
   margin: 0 0 8px;
 }
 
 .caddie-assistant p:last-child,
 .caddie-assistant ul:last-child,
-.caddie-assistant ol:last-child {
+.caddie-assistant ol:last-child,
+.caddie-assistant table:last-child {
   margin-bottom: 0;
+}
+
+.caddie-assistant table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  white-space: normal;
+}
+
+.caddie-assistant th,
+.caddie-assistant td {
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.caddie-assistant th {
+  background: var(--line);
+  font-weight: 700;
 }
 
 .caddie-assistant ul,

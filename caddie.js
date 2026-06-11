@@ -36,11 +36,12 @@ function caddieInline(text) {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
-// 把桿弟回覆的 Markdown 子集（粗體、行內代碼、標題、清單）轉成 HTML；先跳脫原文防注入
+// 把桿弟回覆的 Markdown 子集（粗體、行內代碼、標題、清單、表格）轉成 HTML；先跳脫原文防注入
 function renderCaddieMarkdown(content) {
   const lines = escapeCaddieHtml(content).split("\n");
   const html = [];
   let listTag = null;
+  let tableRows = null;
 
   const closeList = () => {
     if (listTag) {
@@ -49,11 +50,37 @@ function renderCaddieMarkdown(content) {
     }
   };
 
+  const closeTable = () => {
+    if (!tableRows) return;
+    const [head, ...body] = tableRows;
+    const renderRow = (cells, tag) =>
+      `<tr>${cells.map((cell) => `<${tag}>${caddieInline(cell)}</${tag}>`).join("")}</tr>`;
+    html.push("<table>");
+    html.push(`<thead>${renderRow(head, "th")}</thead>`);
+    if (body.length) {
+      html.push(`<tbody>${body.map((cells) => renderRow(cells, "td")).join("")}</tbody>`);
+    }
+    html.push("</table>");
+    tableRows = null;
+  };
+
   lines.forEach((line) => {
     const trimmed = line.trim();
     const bullet = trimmed.match(/^[-*•]\s+(.*)/);
     const ordered = trimmed.match(/^\d+\.\s+(.*)/);
     const heading = trimmed.match(/^#{1,4}\s+(.*)/);
+
+    if (trimmed.length > 1 && trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      closeList();
+      const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+      const isSeparator = cells.every((cell) => /^:?-+:?$/.test(cell));
+      if (!isSeparator) {
+        if (!tableRows) tableRows = [];
+        tableRows.push(cells);
+      }
+      return;
+    }
+    closeTable();
 
     if (bullet || ordered) {
       const tag = bullet ? "ul" : "ol";
@@ -74,6 +101,7 @@ function renderCaddieMarkdown(content) {
     html.push(`<p>${caddieInline(trimmed)}</p>`);
   });
   closeList();
+  closeTable();
   return html.join("");
 }
 
