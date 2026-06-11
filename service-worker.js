@@ -1,9 +1,11 @@
-const cacheName = "begin-with-end-weekly-planner-v30";
+const cacheName = "begin-with-end-weekly-planner-v31";
 const appShell = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./ai-assistant.js",
+  "./caddie.js",
   "./manifest.webmanifest",
   "./icons/icon.svg"
 ];

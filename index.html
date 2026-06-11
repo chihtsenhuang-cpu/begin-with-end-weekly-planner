@@ -32,6 +32,7 @@
     <main class="app-shell">
       <aside class="side-panel" aria-label="功能導覽">
         <button class="nav-button active" type="button" data-view="planner">週計畫</button>
+        <button class="nav-button" type="button" data-view="caddie">桿弟</button>
         <button class="nav-button" type="button" data-view="reminders">提醒</button>
         <button class="nav-button" type="button" data-view="crm">CRM 拜訪</button>
         <button class="nav-button" type="button" data-view="funnel">業務漏斗</button>
@@ -72,6 +73,23 @@
             <div class="table-title">精益求精</div>
             <div id="renewalGrid" class="renewal-grid"></div>
           </section>
+        </section>
+
+        <section id="caddie" class="view" aria-labelledby="caddieTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Caddie</p>
+              <h2 id="caddieTitle">桿弟</h2>
+            </div>
+            <button id="caddieClearBtn" type="button" class="ghost-button">清除對話</button>
+          </div>
+          <div class="caddie-panel">
+            <div id="caddieMessages" class="caddie-messages"></div>
+            <div class="caddie-composer">
+              <textarea id="caddieInput" rows="2" placeholder="跟桿弟聊聊本週的計畫、卡點或客戶⋯（Enter 送出，Shift+Enter 換行）"></textarea>
+              <button id="caddieSendBtn" type="button" class="primary-button">送出</button>
+            </div>
+          </div>
         </section>
 
         <section id="reminders" class="view" aria-labelledby="remindersTitle">
@@ -479,5 +497,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
     <script src="ai-assistant.js"></script>
+    <script src="caddie.js"></script>
   </body>
 </html>
