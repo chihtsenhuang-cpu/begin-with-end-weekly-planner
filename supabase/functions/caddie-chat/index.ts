@@ -48,6 +48,33 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "search_accounts",
+    description:
+      "條件搜尋客戶，回傳精簡清單（最多 20 筆）。keyword 同時比對客戶主檔（姓名、職業、類別、地區、保單、背景、備註、下一步）與拜訪紀錄（摘要、結果）；stage 篩目前階段；idle_days 篩最後聯絡距今達 N 天以上（從未聯絡也算）。條件可組合，至少給一個。",
+    input_schema: {
+      type: "object",
+      properties: {
+        keyword: { type: "string", description: "關鍵字（部分比對）" },
+        stage: {
+          type: "string",
+          enum: [
+            "尚未聯絡",
+            "初步聯繫",
+            "財務＆保單分析",
+            "說明與口頭",
+            "建議書",
+            "成交",
+            "轉介紹",
+            "保服",
+            "理賠",
+            "暫緩",
+          ],
+        },
+        idle_days: { type: "number", description: "最後聯絡距今 ≥ 此天數" },
+      },
+    },
+  },
+  {
     name: "read_playbook",
     description:
       "讀取 playbook 全文。談到話術設計、企業主傳承退休、反對問題、團隊輔導時，先讀對應的 playbook 再回答。",
@@ -194,6 +221,85 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
     });
   }
 
+  if (name === "search_accounts") {
+    const keyword = typeof input?.keyword === "string" ? input.keyword.trim() : "";
+    const stage = typeof input?.stage === "string" ? input.stage : "";
+    const idleDays = typeof input?.idle_days === "number" ? input.idle_days : null;
+    if (!keyword && !stage && idleDays === null) {
+      return "請至少提供一個搜尋條件（keyword / stage / idle_days）。";
+    }
+
+    const { data: accounts, error } = await supabase
+      .from("crm_accounts")
+      .select(
+        "id, name, current_stage, occupation, category, location, policies, background, notes, next_step, last_contact_date"
+      )
+      .is("archived_at", null);
+    if (error) return `查詢失敗：${error.message}`;
+
+    // 拜訪紀錄的摘要／結果也納入關鍵字比對，命中的客戶帶回片段
+    const visitHitsByAccount = new Map<string, unknown[]>();
+    if (keyword) {
+      const pattern = `%${keyword.replace(/[,()%]/g, "")}%`;
+      const { data: visits, error: visitError } = await supabase
+        .from("crm_visit_records")
+        .select("account_id, contact_date, summary, result")
+        .or(`summary.ilike.${pattern},result.ilike.${pattern}`)
+        .order("contact_date", { ascending: false })
+        .limit(40);
+      if (visitError) return `查詢失敗：${visitError.message}`;
+      for (const visit of visits || []) {
+        const hits = visitHitsByAccount.get(visit.account_id) || [];
+        if (hits.length < 3) {
+          hits.push({
+            contact_date: visit.contact_date,
+            summary: visit.summary,
+            result: visit.result,
+          });
+        }
+        visitHitsByAccount.set(visit.account_id, hits);
+      }
+    }
+
+    const textFields = [
+      "name",
+      "occupation",
+      "category",
+      "location",
+      "policies",
+      "background",
+      "notes",
+      "next_step",
+    ];
+    const lowerKeyword = keyword.toLowerCase();
+    const results: unknown[] = [];
+    for (const account of accounts || []) {
+      if (stage && account.current_stage !== stage) continue;
+      const idle = daysSince(account.last_contact_date);
+      if (idleDays !== null && idle !== null && idle < idleDays) continue;
+      const visitHits = visitHitsByAccount.get(account.id) || [];
+      if (keyword) {
+        const fieldHit = textFields.some((field) =>
+          String(account[field] || "").toLowerCase().includes(lowerKeyword)
+        );
+        if (!fieldHit && !visitHits.length) continue;
+      }
+      results.push({
+        name: account.name,
+        stage: account.current_stage,
+        occupation: account.occupation || null,
+        location: account.location || null,
+        last_contact_date: account.last_contact_date,
+        days_since_contact: idle,
+        next_step: account.next_step || null,
+        ...(visitHits.length ? { matched_visits: visitHits } : {}),
+      });
+    }
+
+    if (!results.length) return "沒有符合條件的客戶。";
+    return JSON.stringify({ total: results.length, accounts: results.slice(0, 20) });
+  }
+
   if (name === "get_account") {
     const { data: accounts, error } = await supabase
       .from("crm_accounts")
@@ -206,7 +312,17 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
     if (error) return `查詢失敗：${error.message}`;
     if (!accounts?.length) return `找不到名字含「${input.name}」的客戶。`;
     if (accounts.length > 1) {
-      return `找到多位：${accounts.map((a: { name: string }) => a.name).join("、")}。請指定全名。`;
+      return JSON.stringify({
+        note: "找到多位，以下為摘要；要看完整資料請用全名再查一次。",
+        matches: accounts.map((a: Record<string, unknown>) => ({
+          name: a.name,
+          stage: a.current_stage,
+          occupation: a.occupation || null,
+          location: a.location || null,
+          last_contact_date: a.last_contact_date,
+          next_step: a.next_step || null,
+        })),
+      });
     }
 
     const account = accounts[0];
