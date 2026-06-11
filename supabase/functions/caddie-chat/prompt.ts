@@ -107,7 +107,9 @@ append_playbook 寫回（寫入前徵得同意）。
   handled_stages 是已處理完（前端劃掉）的保服／理賠；
   stage_after 有保服／理賠但不在 handled_stages 的才算待辦
 - search_accounts：條件搜尋客戶——關鍵字（含拜訪紀錄內容）、
-  階段、停滯天數，可組合。「哪些客戶○○」「誰提過××」用這個
+  階段、停滯天數，可組合。「哪些客戶○○」「誰提過××」用這個。
+  結果附 service_pending／service_handled（待辦／已處理完的
+  保服理賠），「哪些保服理賠處理完了／還沒」直接用搜尋結果答
 - read_playbook / append_playbook：讀寫 playbook
 
 談到具體客戶或計畫時，**先查資料再說話**；不在沒看資料的

@@ -50,7 +50,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "search_accounts",
     description:
-      "條件搜尋客戶，回傳精簡清單（最多 100 筆，回傳會標明總數）。keyword 同時比對客戶主檔（姓名、職業、類別、地區、保單、背景、備註、下一步）與拜訪紀錄（摘要、結果）；stage 篩目前階段；idle_days 篩最後聯絡距今達 N 天以上（從未聯絡也算）。條件可組合，至少給一個。",
+      "條件搜尋客戶，回傳精簡清單（最多 100 筆，回傳會標明總數）。keyword 同時比對客戶主檔（姓名、職業、類別、地區、保單、背景、備註、下一步）與拜訪紀錄（摘要、結果）；stage 篩目前階段；idle_days 篩最後聯絡距今達 N 天以上（從未聯絡也算）。條件可組合，至少給一個。結果附 service_pending／service_handled：該客戶待辦與已處理完（前端劃掉）的保服／理賠；多筆拜訪時同一階段可能兩邊都出現。",
     input_schema: {
       type: "object",
       properties: {
@@ -261,6 +261,28 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
       }
     }
 
+    // 保服／理賠處理狀態：逐筆拜訪比對 stage_after 與 handled_stages（前端劃掉）
+    const servicePendingByAccount = new Map<string, Set<string>>();
+    const serviceHandledByAccount = new Map<string, Set<string>>();
+    {
+      const { data: serviceVisits, error: serviceError } = await supabase
+        .from("crm_visit_records")
+        .select("account_id, stage_after, handled_stages")
+        .or("stage_after.ilike.%保服%,stage_after.ilike.%理賠%");
+      if (serviceError) return `查詢失敗：${serviceError.message}`;
+      for (const visit of serviceVisits || []) {
+        const stages = String(visit.stage_after || "").split(",").map((s) => s.trim());
+        const handled = String(visit.handled_stages || "").split(",").map((s) => s.trim());
+        for (const serviceStage of ["保服", "理賠"]) {
+          if (!stages.includes(serviceStage)) continue;
+          const map = handled.includes(serviceStage) ? serviceHandledByAccount : servicePendingByAccount;
+          const set = map.get(visit.account_id) || new Set<string>();
+          set.add(serviceStage);
+          map.set(visit.account_id, set);
+        }
+      }
+    }
+
     const textFields = [
       "name",
       "occupation",
@@ -284,6 +306,8 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
         );
         if (!fieldHit && !visitHits.length) continue;
       }
+      const pendingSet = servicePendingByAccount.get(account.id);
+      const handledSet = serviceHandledByAccount.get(account.id);
       results.push({
         name: account.name,
         stage: account.current_stage,
@@ -292,6 +316,8 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
         last_contact_date: account.last_contact_date,
         days_since_contact: idle,
         next_step: account.next_step || null,
+        ...(pendingSet ? { service_pending: [...pendingSet] } : {}),
+        ...(handledSet ? { service_handled: [...handledSet] } : {}),
         ...(visitHits.length ? { matched_visits: visitHits } : {}),
       });
     }
