@@ -22,6 +22,61 @@ function caddieReady() {
   return Boolean(supabaseClient && supabaseSession?.user);
 }
 
+function escapeCaddieHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function caddieInline(text) {
+  return text
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+// 把桿弟回覆的 Markdown 子集（粗體、行內代碼、標題、清單）轉成 HTML；先跳脫原文防注入
+function renderCaddieMarkdown(content) {
+  const lines = escapeCaddieHtml(content).split("\n");
+  const html = [];
+  let listTag = null;
+
+  const closeList = () => {
+    if (listTag) {
+      html.push(`</${listTag}>`);
+      listTag = null;
+    }
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    const bullet = trimmed.match(/^[-*•]\s+(.*)/);
+    const ordered = trimmed.match(/^\d+\.\s+(.*)/);
+    const heading = trimmed.match(/^#{1,4}\s+(.*)/);
+
+    if (bullet || ordered) {
+      const tag = bullet ? "ul" : "ol";
+      if (listTag !== tag) {
+        closeList();
+        html.push(`<${tag}>`);
+        listTag = tag;
+      }
+      html.push(`<li>${caddieInline((bullet || ordered)[1])}</li>`);
+      return;
+    }
+    closeList();
+    if (!trimmed) return;
+    if (heading) {
+      html.push(`<p class="caddie-heading">${caddieInline(heading[1])}</p>`);
+      return;
+    }
+    html.push(`<p>${caddieInline(trimmed)}</p>`);
+  });
+  closeList();
+  return html.join("");
+}
+
 function renderCaddie() {
   const container = document.querySelector("#caddieMessages");
   if (!container) return;
@@ -54,7 +109,11 @@ function renderCaddie() {
   caddieMessages.forEach((message) => {
     const bubble = document.createElement("div");
     bubble.className = `caddie-bubble caddie-${message.role}`;
-    bubble.textContent = message.content;
+    if (message.role === "assistant") {
+      bubble.innerHTML = renderCaddieMarkdown(message.content);
+    } else {
+      bubble.textContent = message.content;
+    }
     container.append(bubble);
   });
 
@@ -111,6 +170,8 @@ function bindCaddie() {
 
   sendButton.addEventListener("click", submit);
   input.addEventListener("keydown", (event) => {
+    // 輸入法組字中（選字的 Enter）不送出；keyCode 229 是 Safari 的相容寫法
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();

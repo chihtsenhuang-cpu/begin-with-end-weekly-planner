@@ -1597,6 +1597,35 @@ button {
   border-bottom-left-radius: 4px;
 }
 
+.caddie-assistant p,
+.caddie-assistant ul,
+.caddie-assistant ol {
+  margin: 0 0 8px;
+}
+
+.caddie-assistant p:last-child,
+.caddie-assistant ul:last-child,
+.caddie-assistant ol:last-child {
+  margin-bottom: 0;
+}
+
+.caddie-assistant ul,
+.caddie-assistant ol {
+  padding-left: 20px;
+}
+
+.caddie-assistant .caddie-heading {
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.caddie-assistant code {
+  background: var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+}
+
 .caddie-pending {
   color: var(--muted);
   font-style: italic;
