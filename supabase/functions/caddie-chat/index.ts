@@ -50,7 +50,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "search_accounts",
     description:
-      "條件搜尋客戶，回傳精簡清單（最多 20 筆）。keyword 同時比對客戶主檔（姓名、職業、類別、地區、保單、背景、備註、下一步）與拜訪紀錄（摘要、結果）；stage 篩目前階段；idle_days 篩最後聯絡距今達 N 天以上（從未聯絡也算）。條件可組合，至少給一個。",
+      "條件搜尋客戶，回傳精簡清單（最多 100 筆，回傳會標明總數）。keyword 同時比對客戶主檔（姓名、職業、類別、地區、保單、背景、備註、下一步）與拜訪紀錄（摘要、結果）；stage 篩目前階段；idle_days 篩最後聯絡距今達 N 天以上（從未聯絡也算）。條件可組合，至少給一個。",
     input_schema: {
       type: "object",
       properties: {
@@ -297,7 +297,7 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
     }
 
     if (!results.length) return "沒有符合條件的客戶。";
-    return JSON.stringify({ total: results.length, accounts: results.slice(0, 20) });
+    return JSON.stringify({ total: results.length, accounts: results.slice(0, 100) });
   }
 
   if (name === "get_account") {
