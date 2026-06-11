@@ -333,7 +333,7 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
         .eq("account_id", account.id),
       supabase
         .from("crm_visit_records")
-        .select("contact_date, method, summary, result, next_step, stage_after")
+        .select("contact_date, method, summary, result, next_step, stage_after, handled_stages")
         .eq("account_id", account.id)
         .order("contact_date", { ascending: false })
         .limit(10),
