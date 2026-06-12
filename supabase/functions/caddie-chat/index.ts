@@ -75,6 +75,19 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "append_ai_profile",
+    description:
+      "把對這位客戶的新理解、背景脈絡或本次討論的結論，追加到該客戶的 AI 檔案末尾（get_account 會帶回全文）。寫入前必須先向使用者提議並取得同意。",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "客戶姓名（可部分比對，多人時會要求指定全名）" },
+        content: { type: "string", description: "要追加的 markdown 內容" },
+      },
+      required: ["name", "content"],
+    },
+  },
+  {
     name: "read_playbook",
     description:
       "讀取 playbook 全文。談到話術設計、企業主傳承退休、反對問題、團隊輔導時，先讀對應的 playbook 再回答。",
@@ -372,7 +385,7 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
     }
 
     const account = accounts[0];
-    const [{ data: products }, { data: visits }] = await Promise.all([
+    const [{ data: products }, { data: visits }, { data: aiProfile }] = await Promise.all([
       supabase
         .from("crm_account_products")
         .select("product_type, note")
@@ -383,6 +396,11 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
         .eq("account_id", account.id)
         .order("contact_date", { ascending: false })
         .limit(10),
+      supabase
+        .from("crm_ai_profiles")
+        .select("content")
+        .eq("account_id", account.id)
+        .maybeSingle(),
     ]);
 
     const { id: _id, ...accountFields } = account;
@@ -390,7 +408,39 @@ async function runTool(supabase: any, userId: string, name: string, input: any):
       account: accountFields,
       products: products || [],
       recent_visits: visits || [],
+      ai_profile: aiProfile?.content || null,
     });
+  }
+
+  if (name === "append_ai_profile") {
+    const { data: accounts, error } = await supabase
+      .from("crm_accounts")
+      .select("id, name")
+      .ilike("name", `%${input.name}%`)
+      .is("archived_at", null)
+      .limit(5);
+    if (error) return `查詢失敗：${error.message}`;
+    if (!accounts?.length) return `找不到名字含「${input.name}」的客戶。`;
+    if (accounts.length > 1) {
+      return `找到多位：${accounts.map((a: { name: string }) => a.name).join("、")}。請用全名再寫一次。`;
+    }
+    const account = accounts[0];
+    const { data: existing, error: readError } = await supabase
+      .from("crm_ai_profiles")
+      .select("content")
+      .eq("account_id", account.id)
+      .maybeSingle();
+    if (readError) return `讀取失敗：${readError.message}`;
+    const section = `### ${taipeiToday()}\n\n${input.content}`;
+    const updated = existing?.content ? `${existing.content}\n\n---\n\n${section}` : section;
+    const { error: writeError } = await supabase
+      .from("crm_ai_profiles")
+      .upsert(
+        { user_id: userId, account_id: account.id, content: updated, updated_at: new Date().toISOString() },
+        { onConflict: "user_id,account_id" }
+      );
+    if (writeError) return `寫入失敗：${writeError.message}`;
+    return `已寫入「${account.name}」的 AI 檔案。`;
   }
 
   if (name === "read_playbook") {

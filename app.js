@@ -2069,12 +2069,17 @@ function renderCrmDetail(editingVisitId = "") {
   title.append(name, meta);
   const actions = document.createElement("div");
   actions.className = "button-row compact-row";
+  const aiProfile = document.createElement("button");
+  aiProfile.type = "button";
+  aiProfile.className = "ghost-button";
+  aiProfile.textContent = "AI 檔案";
+  aiProfile.addEventListener("click", () => openCrmAiProfile(account));
   const edit = document.createElement("button");
   edit.type = "button";
   edit.className = "ghost-button";
   edit.textContent = "編輯客戶";
   edit.addEventListener("click", () => openCrmAccountEditor(account.id));
-  actions.append(edit);
+  actions.append(aiProfile, edit);
   header.append(title, actions);
 
   const status = document.createElement("div");
@@ -2116,6 +2121,36 @@ function renderCrmDetail(editingVisitId = "") {
   timelineBlock.append(timelineTitle, renderCrmVisitTimeline(account));
 
   detail.append(header, status, profile, visitBlock, timelineBlock);
+}
+
+// AI 檔案存雲端 crm_ai_profiles（桿弟寫入、此處唯讀），不進本機 crmState
+async function openCrmAiProfile(account) {
+  const dialog = document.querySelector("#crmAiProfileDialog");
+  const body = document.querySelector("#crmAiProfileContent");
+  const meta = document.querySelector("#crmAiProfileMeta");
+  document.querySelector("#crmAiProfileTitle").textContent = `${account.name}｜AI 檔案`;
+  meta.textContent = "";
+  dialog.showModal();
+  if (!supabaseClient || !supabaseSession?.user) {
+    body.textContent = "請先到「提醒與 AI」登入 Supabase，才能讀取 AI 檔案。";
+    return;
+  }
+  body.textContent = "載入中…";
+  const { data, error } = await supabaseClient
+    .from("crm_ai_profiles")
+    .select("content, updated_at")
+    .eq("account_id", account.id)
+    .maybeSingle();
+  if (error) {
+    body.textContent = `載入失敗：${error.message}`;
+    return;
+  }
+  if (!data?.content) {
+    body.textContent = "這位客戶還沒有 AI 檔案。跟桿弟討論過這位客戶後，請他把重點記進來。";
+    return;
+  }
+  body.innerHTML = renderCaddieMarkdown(data.content);
+  meta.textContent = `最後更新：${new Date(data.updated_at).toLocaleString("zh-TW")}`;
 }
 
 function renderCrm() {
@@ -2542,6 +2577,9 @@ function bindCrmActions() {
     saveCrmAccount();
   });
   document.querySelector("#cancelCrmAccountBtn").addEventListener("click", closeCrmAccountEditor);
+  document.querySelector("#closeCrmAiProfileBtn").addEventListener("click", () => {
+    document.querySelector("#crmAiProfileDialog").close();
+  });
   document.querySelector("#deleteCrmAccountBtn").addEventListener("click", deleteCrmAccount);
   document.querySelector("#crmAccountPoliciesAddBtn").addEventListener("click", addCrmPolicyOption);
   document.querySelector("#crmAccountPoliciesNew").addEventListener("keydown", (event) => {

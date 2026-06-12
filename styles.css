@@ -1684,3 +1684,22 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+.crm-ai-profile-dialog {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.crm-ai-profile-body.caddie-assistant {
+  align-self: stretch;
+  background: transparent;
+  border: none;
+  max-height: 60vh;
+  overflow-y: auto;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.crm-ai-profile-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+}

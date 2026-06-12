@@ -333,3 +333,42 @@ on public.crm_import_rows
 for delete
 to authenticated
 using (auth.uid() = user_id);
+
+create table if not exists public.crm_ai_profiles (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  account_id uuid not null references public.crm_accounts(id) on delete cascade,
+  content text not null default '',
+  updated_at timestamptz not null default now(),
+  primary key (user_id, account_id)
+);
+
+alter table public.crm_ai_profiles enable row level security;
+
+drop policy if exists "Users can read their own CRM AI profiles" on public.crm_ai_profiles;
+create policy "Users can read their own CRM AI profiles"
+on public.crm_ai_profiles
+for select
+to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "Users can insert their own CRM AI profiles" on public.crm_ai_profiles;
+create policy "Users can insert their own CRM AI profiles"
+on public.crm_ai_profiles
+for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can update their own CRM AI profiles" on public.crm_ai_profiles;
+create policy "Users can update their own CRM AI profiles"
+on public.crm_ai_profiles
+for update
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "Users can delete their own CRM AI profiles" on public.crm_ai_profiles;
+create policy "Users can delete their own CRM AI profiles"
+on public.crm_ai_profiles
+for delete
+to authenticated
+using (auth.uid() = user_id);
