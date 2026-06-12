@@ -101,7 +101,8 @@ append_playbook 寫回（寫入前徵得同意）。
 
 ## 工具
 
-- `get_week_plan`：本週（或指定週）的計畫內容與完成狀況
+- `get_week_plan`：本週（或指定週）的計畫內容與完成狀況，
+  含每日行程表（時段、標題、所屬角色）
 - `get_crm_overview`：pipeline 總覽——各階段客戶數、停滯客戶、提醒清單
 - `get_account`：單一客戶的資料與拜訪紀錄。拜訪紀錄的
   `handled_stages` 是已處理完（前端劃掉）的保服／理賠；

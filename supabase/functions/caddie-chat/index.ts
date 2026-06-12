@@ -19,7 +19,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "get_week_plan",
     description:
-      "取得使用者某一週的週計畫：角色目標與完成狀況、每日重要事項與完成狀況。不帶參數時回傳本週。",
+      "取得使用者某一週的週計畫：角色目標與完成狀況、每日重要事項與完成狀況、每日行程表（時段、標題、所屬角色）。不帶參數時回傳本週。",
     input_schema: {
       type: "object",
       properties: {
@@ -157,7 +157,27 @@ function condenseWeekPlan(plan: any, weekStart: string) {
     }))
     .filter((day: { items: unknown[] }) => day.items.length > 0);
 
-  return { week_start: weekStart, roles, important };
+  const roleNames = (plan.roles || []).map(
+    (role: { roles?: string[] }) => (role.roles || []).filter(Boolean).join("／")
+  );
+  const schedule = [...(plan.schedule || [])]
+    .sort(
+      (a: { dayIndex?: number; start?: string }, b: { dayIndex?: number; start?: string }) =>
+        (Number(a.dayIndex) || 0) - (Number(b.dayIndex) || 0) ||
+        String(a.start || "").localeCompare(String(b.start || ""))
+    )
+    .map((event: { title?: string; dayIndex?: number; start?: string; end?: string; roleIndex?: unknown }) => ({
+      day: `週${DAY_NAMES[Number(event.dayIndex) || 0] ?? event.dayIndex}`,
+      start: event.start || "",
+      end: event.end || "",
+      title: event.title || "未命名行程",
+      role:
+        event.roleIndex === "office-event"
+          ? "辦公室事件"
+          : roleNames[Number(event.roleIndex)] || null,
+    }));
+
+  return { week_start: weekStart, roles, important, schedule };
 }
 
 // deno-lint-ignore no-explicit-any
