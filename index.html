@@ -81,6 +81,7 @@
               <p class="eyebrow">Caddie</p>
               <h2 id="caddieTitle">桿弟</h2>
             </div>
+            <button id="caddieInspectBtn" type="button" class="ghost-button">檢視設定</button>
             <button id="caddieClearBtn" type="button" class="ghost-button">清除對話</button>
           </div>
           <div class="caddie-panel">
@@ -482,6 +483,29 @@
         <div id="crmAiProfileContent" class="crm-ai-profile-body caddie-assistant"></div>
         <footer>
           <span id="crmAiProfileMeta" class="crm-ai-profile-meta"></span>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="caddieInspectDialog" class="schedule-dialog crm-ai-profile-dialog">
+      <form method="dialog">
+        <header>
+          <h3>桿弟的設定</h3>
+          <button id="closeCaddieInspectBtn" type="button" class="plain-icon" aria-label="關閉">×</button>
+        </header>
+        <label class="field-row">
+          <span>檢視</span>
+          <select id="caddieInspectTarget">
+            <option value="__prompt__">System Prompt（部署中）</option>
+            <option value="對話技巧">Playbook：對話技巧</option>
+            <option value="企業主傳承與退休">Playbook：企業主傳承與退休</option>
+            <option value="反對問題拆解">Playbook：反對問題拆解</option>
+            <option value="團隊輔導">Playbook：團隊輔導</option>
+          </select>
+        </label>
+        <div id="caddieInspectBody" class="crm-ai-profile-body caddie-assistant"></div>
+        <footer>
+          <span id="caddieInspectMeta" class="crm-ai-profile-meta"></span>
         </footer>
       </form>
     </dialog>
