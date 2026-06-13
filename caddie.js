@@ -183,6 +183,68 @@ async function sendCaddieMessage(text) {
   }
 }
 
+// ── 桿弟檢視：看目前部署中的 system prompt，與各 playbook 的「出廠版 vs 雲端實際讀的版本」
+let caddieInspectData = null; // { system_prompt, playbook_seeds }
+
+async function openCaddieInspect() {
+  const dialog = document.querySelector("#caddieInspectDialog");
+  const body = document.querySelector("#caddieInspectBody");
+  const meta = document.querySelector("#caddieInspectMeta");
+  dialog.showModal();
+  meta.textContent = "";
+  if (!caddieReady()) {
+    body.textContent = "請先到「提醒與 AI」完成 Supabase 連線並登入，才能讀取桿弟的設定。";
+    caddieInspectData = null;
+    return;
+  }
+  body.textContent = "載入中…";
+  // 每次開啟都重抓，確保部署後看到的是最新的 prompt
+  const { data, error } = await supabaseClient.functions.invoke("caddie-chat", {
+    body: { action: "get_prompt" },
+  });
+  if (error || data?.error) {
+    body.textContent = `載入失敗：${error?.message || data?.error}`;
+    caddieInspectData = null;
+    return;
+  }
+  caddieInspectData = data;
+  await renderCaddieInspect();
+}
+
+async function renderCaddieInspect() {
+  if (!caddieInspectData) return;
+  const target = document.querySelector("#caddieInspectTarget").value;
+  const body = document.querySelector("#caddieInspectBody");
+  const meta = document.querySelector("#caddieInspectMeta");
+
+  if (target === "__prompt__") {
+    body.innerHTML = renderCaddieMarkdown(caddieInspectData.system_prompt || "（空）");
+    meta.textContent = "目前部署中的 system prompt — 桿弟每次回覆都讀這份，改了部署就生效，沒有雲端複本問題。";
+    return;
+  }
+
+  // playbook：先備好出廠版，再去雲端看桿弟實際讀的那份
+  const seed = caddieInspectData.playbook_seeds?.[target] || "（出廠版找不到這份 playbook）";
+  body.textContent = "讀取雲端版…";
+  const { data, error } = await supabaseClient
+    .from("caddie_playbooks")
+    .select("content, updated_at")
+    .eq("name", target)
+    .maybeSingle();
+  if (error) {
+    body.innerHTML = renderCaddieMarkdown(seed);
+    meta.textContent = `雲端讀取失敗（${error.message}）。以下顯示出廠版。`;
+    return;
+  }
+  if (data?.content) {
+    body.innerHTML = renderCaddieMarkdown(data.content);
+    meta.textContent = `雲端版（桿弟實際讀的就是這份）· 最後更新 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
+  } else {
+    body.innerHTML = renderCaddieMarkdown(seed);
+    meta.textContent = "出廠預設 · 雲端還沒有複本（桿弟第一次讀到這份時才會複印過去）。";
+  }
+}
+
 function bindCaddie() {
   const input = document.querySelector("#caddieInput");
   const sendButton = document.querySelector("#caddieSendBtn");
@@ -211,6 +273,12 @@ function bindCaddie() {
     renderCaddie();
   });
   navButton?.addEventListener("click", renderCaddie);
+
+  document.querySelector("#caddieInspectBtn")?.addEventListener("click", openCaddieInspect);
+  document.querySelector("#caddieInspectTarget")?.addEventListener("change", renderCaddieInspect);
+  document.querySelector("#closeCaddieInspectBtn")?.addEventListener("click", () => {
+    document.querySelector("#caddieInspectDialog").close();
+  });
 }
 
 loadCaddieMessages();

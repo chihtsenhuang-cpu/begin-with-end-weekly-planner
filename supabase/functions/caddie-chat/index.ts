@@ -547,6 +547,15 @@ Deno.serve(async (req) => {
     const userId = userData.user.id;
 
     const body = await req.json();
+
+    // 檢視畫面用：回傳目前部署中的 system prompt 與出廠 playbook 種子（不跑 Claude）
+    if (body?.action === "get_prompt") {
+      return new Response(
+        JSON.stringify({ system_prompt: SYSTEM_PROMPT, playbook_seeds: PLAYBOOK_SEEDS }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const history = Array.isArray(body?.messages) ? body.messages.slice(-30) : [];
     if (!history.length) {
       return new Response(JSON.stringify({ error: "messages 不可為空" }), {
