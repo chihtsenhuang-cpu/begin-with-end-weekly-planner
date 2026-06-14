@@ -2123,7 +2123,7 @@ function renderCrmDetail(editingVisitId = "") {
   detail.append(header, status, profile, visitBlock, timelineBlock);
 }
 
-// AI 檔案存雲端 crm_ai_profiles（桿弟寫入、此處唯讀），不進本機 crmState
+// AI 檔案存雲端 crm_ai_profiles（Felix 寫入、此處唯讀），不進本機 crmState
 async function openCrmAiProfile(account) {
   const dialog = document.querySelector("#crmAiProfileDialog");
   const body = document.querySelector("#crmAiProfileContent");
@@ -2146,7 +2146,7 @@ async function openCrmAiProfile(account) {
     return;
   }
   if (!data?.content) {
-    body.textContent = "這位客戶還沒有 AI 檔案。跟桿弟討論過這位客戶後，請他把重點記進來。";
+    body.textContent = "這位客戶還沒有 AI 檔案。跟 Felix 討論過這位客戶後，請他把重點記進來。";
     return;
   }
   body.innerHTML = renderCaddieMarkdown(data.content);

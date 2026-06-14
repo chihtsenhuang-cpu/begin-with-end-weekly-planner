@@ -1,4 +1,4 @@
-// 桿弟：對話介面（Layer 2，呼叫 Supabase Edge Function caddie-chat）
+// Felix：對話介面（Layer 2，呼叫 Supabase Edge Function caddie-chat）
 // 依賴 app.js 已定義的全域：supabaseClient、supabaseSession
 
 const caddieStorageKey = "begin-with-end-caddie-chat";
@@ -36,7 +36,7 @@ function caddieInline(text) {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 
-// 把桿弟回覆的 Markdown 子集（粗體、行內代碼、標題、清單、表格）轉成 HTML；先跳脫原文防注入
+// 把 Felix 回覆的 Markdown 子集（粗體、行內代碼、標題、清單、表格）轉成 HTML；先跳脫原文防注入
 function renderCaddieMarkdown(content) {
   const lines = escapeCaddieHtml(content).split("\n");
   const html = [];
@@ -113,7 +113,7 @@ function renderCaddie() {
   if (!caddieReady()) {
     const note = document.createElement("p");
     note.className = "note";
-    note.textContent = "請先到「提醒與 AI」完成 Supabase 連線並登入，桿弟才能讀取你的週計畫與 CRM。";
+    note.textContent = "請先到「提醒與 AI」完成 Supabase 連線並登入，Felix 才能讀取你的週計畫與 CRM。";
     container.append(note);
     return;
   }
@@ -123,7 +123,7 @@ function renderCaddie() {
     empty.className = "caddie-empty";
     const text = document.createElement("p");
     text.className = "note";
-    text.textContent = "還沒開始對話。桿弟開場會先看你的週計畫和 pipeline，給一份進度快照。";
+    text.textContent = "還沒開始對話。Felix 開場會先看你的週計畫和 pipeline，給一份進度快照。";
     const startButton = document.createElement("button");
     startButton.type = "button";
     startButton.className = "primary-button";
@@ -148,7 +148,7 @@ function renderCaddie() {
   if (caddieSending) {
     const pending = document.createElement("div");
     pending.className = "caddie-bubble caddie-assistant caddie-pending";
-    pending.textContent = "桿弟思考中⋯";
+    pending.textContent = "Felix 思考中⋯";
     container.append(pending);
   }
 
@@ -183,7 +183,7 @@ async function sendCaddieMessage(text) {
   }
 }
 
-// ── 桿弟檢視：看目前部署中的 system prompt，與各 playbook 的「出廠版 vs 雲端實際讀的版本」
+// ── Felix 檢視：看目前部署中的 system prompt，與各 playbook 的「出廠版 vs 雲端實際讀的版本」
 let caddieInspectData = null; // { system_prompt, playbook_seeds }
 
 async function openCaddieInspect() {
@@ -193,7 +193,7 @@ async function openCaddieInspect() {
   dialog.showModal();
   meta.textContent = "";
   if (!caddieReady()) {
-    body.textContent = "請先到「提醒與 AI」完成 Supabase 連線並登入，才能讀取桿弟的設定。";
+    body.textContent = "請先到「提醒與 AI」完成 Supabase 連線並登入，才能讀取 Felix 的設定。";
     caddieInspectData = null;
     return;
   }
@@ -219,11 +219,11 @@ async function renderCaddieInspect() {
 
   if (target === "__prompt__") {
     body.innerHTML = renderCaddieMarkdown(caddieInspectData.system_prompt || "（空）");
-    meta.textContent = "目前部署中的 system prompt — 桿弟每次回覆都讀這份，改了部署就生效，沒有雲端複本問題。";
+    meta.textContent = "目前部署中的 system prompt — Felix 每次回覆都讀這份，改了部署就生效，沒有雲端複本問題。";
     return;
   }
 
-  // playbook：先備好出廠版，再去雲端看桿弟實際讀的那份
+  // playbook：先備好出廠版，再去雲端看 Felix 實際讀的那份
   const seed = caddieInspectData.playbook_seeds?.[target] || "（出廠版找不到這份 playbook）";
   body.textContent = "讀取雲端版…";
   const { data, error } = await supabaseClient
@@ -238,10 +238,10 @@ async function renderCaddieInspect() {
   }
   if (data?.content) {
     body.innerHTML = renderCaddieMarkdown(data.content);
-    meta.textContent = `雲端版（桿弟實際讀的就是這份）· 最後更新 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
+    meta.textContent = `雲端版（Felix 實際讀的就是這份）· 最後更新 ${new Date(data.updated_at).toLocaleString("zh-TW")}`;
   } else {
     body.innerHTML = renderCaddieMarkdown(seed);
-    meta.textContent = "出廠預設 · 雲端還沒有複本（桿弟第一次讀到這份時才會複印過去）。";
+    meta.textContent = "出廠預設 · 雲端還沒有複本（Felix 第一次讀到這份時才會複印過去）。";
   }
 }
 
