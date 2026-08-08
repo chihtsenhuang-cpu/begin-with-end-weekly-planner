@@ -1,8 +1,8 @@
 // 桿弟 agent — Supabase Edge Function
-// 前端傳 { messages: [{role, content}] }，本函式跑 Claude 工具迴圈後回 { reply }
-// 環境變數：ANTHROPIC_API_KEY（自行設定）；SUPABASE_URL / SUPABASE_ANON_KEY（平台自動注入）
+// 前端傳 { messages: [{role, content}] }，本函式跑 DeepSeek 工具迴圈後回 { reply }
+// 環境變數：DEEPSEEK_API_KEY（自行設定）；SUPABASE_URL / SUPABASE_ANON_KEY（平台自動注入）
 
-import Anthropic from "npm:@anthropic-ai/sdk";
+import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { SYSTEM_PROMPT, PLAYBOOK_SEEDS } from "./prompt.ts";
 
@@ -15,12 +15,12 @@ const ACTIVE_STAGES = ["初步聯繫", "財務＆保單分析", "說明與口頭
 const STAGNANT_DAYS = 7;
 const MAX_TOOL_ITERATIONS = 8;
 
-const TOOLS: Anthropic.Tool[] = [
+const TOOL_DEFS = [
   {
     name: "get_week_plan",
     description:
       "取得使用者某一週的週計畫：角色目標與完成狀況、每日重要事項與完成狀況、每日行程表（時段、標題、所屬角色）。不帶參數時回傳本週。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         week_start: {
@@ -34,12 +34,12 @@ const TOOLS: Anthropic.Tool[] = [
     name: "get_crm_overview",
     description:
       "取得 CRM pipeline 總覽：各階段客戶數、停滯客戶清單（活躍階段超過 7 天未聯絡）、逾期追蹤清單、pipeline 廣度（近 7 天有動的活躍客戶數）。",
-    input_schema: { type: "object", properties: {} },
+    parameters: { type: "object", properties: {} },
   },
   {
     name: "get_account",
     description: "用姓名查單一客戶：基本資料、進行中商品、最近 10 筆拜訪紀錄。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         name: { type: "string", description: "客戶姓名（可部分比對）" },
@@ -51,7 +51,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "search_accounts",
     description:
       "條件搜尋客戶，回傳精簡清單（最多 100 筆，回傳會標明總數）。keyword 同時比對客戶主檔（姓名、職業、類別、地區、保單、背景、備註、下一步）與拜訪紀錄（摘要、結果）；stage 篩目前階段；idle_days 篩最後聯絡距今達 N 天以上（從未聯絡也算）。條件可組合，至少給一個。結果附 service_pending／service_handled：該客戶待辦與已處理完（前端劃掉）的保服／理賠；多筆拜訪時同一階段可能兩邊都出現。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         keyword: { type: "string", description: "關鍵字（部分比對）" },
@@ -78,7 +78,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "append_ai_profile",
     description:
       "把對這位客戶的新理解、背景脈絡或本次討論的結論，追加到該客戶的 AI 檔案末尾（get_account 會帶回全文）。寫入前必須先向使用者提議並取得同意。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         name: { type: "string", description: "客戶姓名（可部分比對，多人時會要求指定全名）" },
@@ -91,7 +91,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "rewrite_ai_profile",
     description:
       "用新內容整份取代這位客戶的 AI 檔案（濃縮、整併、清掉過時資訊時用）。重寫前必須把新版本完整給使用者過目並取得同意；只能合併重複、去掉過時資訊，不可丟掉關鍵事實與日期脈絡。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         name: { type: "string", description: "客戶姓名（可部分比對，多人時會要求指定全名）" },
@@ -104,7 +104,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "read_playbook",
     description:
       "讀取 playbook 全文。談到話術設計、企業主傳承退休、反對問題、團隊輔導時，先讀對應的 playbook 再回答。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         name: {
@@ -119,7 +119,7 @@ const TOOLS: Anthropic.Tool[] = [
     name: "append_playbook",
     description:
       "把對話中拆解出的新結論追加到 playbook 末尾。寫入前必須先向使用者提議並取得同意。",
-    input_schema: {
+    parameters: {
       type: "object",
       properties: {
         name: {
@@ -132,6 +132,11 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
 ];
+
+const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = TOOL_DEFS.map((tool) => ({
+  type: "function",
+  function: tool,
+}));
 
 function taipeiNow(): Date {
   return new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -548,7 +553,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
 
-    // 檢視畫面用：回傳目前部署中的 system prompt 與出廠 playbook 種子（不跑 Claude）
+    // 檢視畫面用：回傳目前部署中的 system prompt 與出廠 playbook 種子（不跑模型）
     if (body?.action === "get_prompt") {
       return new Response(
         JSON.stringify({ system_prompt: SYSTEM_PROMPT, playbook_seeds: PLAYBOOK_SEEDS }),
@@ -564,64 +569,53 @@ Deno.serve(async (req) => {
       });
     }
 
-    const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_API_KEY")! });
+    const deepseek = new OpenAI({
+      apiKey: Deno.env.get("DEEPSEEK_API_KEY")!,
+      baseURL: "https://api.deepseek.com",
+    });
 
-    const messages: Anthropic.MessageParam[] = history.map(
-      (message: { role: string; content: string }) => ({
-        role: message.role === "assistant" ? "assistant" : "user",
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...history.map((message: { role: string; content: string }) => ({
+        role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
         content: String(message.content),
-      })
-    );
+      })),
+    ];
 
     const usedTools: string[] = [];
-    let response: Anthropic.Message | null = null;
+    let finalMessage: OpenAI.Chat.Completions.ChatCompletionMessage | null = null;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
-      response = await anthropic.messages.create({
-        model: "claude-opus-4-8",
+      const completion = await deepseek.chat.completions.create({
+        model: "deepseek-v4-flash",
         max_tokens: 16000,
-        thinking: { type: "adaptive" },
-        system: [
-          {
-            type: "text",
-            text: SYSTEM_PROMPT,
-            cache_control: { type: "ephemeral" },
-          },
-        ],
-        tools: TOOLS,
         messages,
+        tools: TOOLS,
       });
 
-      if (response.stop_reason !== "tool_use") break;
+      finalMessage = completion.choices[0]?.message ?? null;
+      const toolCalls = finalMessage?.tool_calls || [];
+      if (!finalMessage || !toolCalls.length) break;
 
-      const toolUseBlocks = response.content.filter(
-        (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
-      );
-      messages.push({ role: "assistant", content: response.content });
+      // 帶 tools 的後續請求必須原樣傳回 reasoning_content（DeepSeek 規定，缺了會 400），
+      // 直接把整個 assistant message 塞回歷史即可
+      messages.push(finalMessage as OpenAI.Chat.Completions.ChatCompletionMessageParam);
 
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const block of toolUseBlocks) {
-        usedTools.push(block.name);
+      for (const toolCall of toolCalls) {
+        const fn = (toolCall as OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall).function;
+        usedTools.push(fn.name);
         let result: string;
         try {
-          result = await runTool(supabase, userId, block.name, block.input);
+          const input = JSON.parse(fn.arguments || "{}");
+          result = await runTool(supabase, userId, fn.name, input);
         } catch (toolError) {
           result = `工具執行錯誤：${(toolError as Error).message}`;
         }
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: result,
-        });
+        messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
       }
-      messages.push({ role: "user", content: toolResults });
     }
 
-    const reply = (response?.content || [])
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    const reply = (finalMessage?.content || "").trim();
 
     return new Response(
       JSON.stringify({ reply: reply || "（沒有產生回覆，請再試一次）", tools_used: usedTools }),
