@@ -1,10 +1,10 @@
 // 桿弟 agent — Supabase Edge Function
-// 前端傳 { messages: [{role, content}] }，本函式跑 DeepSeek 工具迴圈後回 { reply }
+// 前端傳 { messages: [{role, content}], mode }，本函式跑 DeepSeek 工具迴圈後回 { reply }
 // 環境變數：DEEPSEEK_API_KEY（自行設定）；SUPABASE_URL / SUPABASE_ANON_KEY（平台自動注入）
 
 import OpenAI from "npm:openai";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { SYSTEM_PROMPT, PLAYBOOK_SEEDS } from "./prompt.ts";
+import { buildSystemPrompt, MODE_PROMPTS, PLAYBOOK_SEEDS } from "./prompt.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -133,10 +133,47 @@ const TOOL_DEFS = [
   },
 ];
 
-const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = TOOL_DEFS.map((tool) => ({
-  type: "function",
-  function: tool,
-}));
+// 每個模式只開自己用得到的工具與 playbook，減少小模型選錯的機會
+const MODE_TOOLS: Record<string, { tools: string[]; playbooks: string[] }> = {
+  weekly: {
+    tools: ["get_week_plan", "get_crm_overview"],
+    playbooks: [],
+  },
+  accounts: {
+    tools: [
+      "get_account",
+      "search_accounts",
+      "append_ai_profile",
+      "rewrite_ai_profile",
+      "read_playbook",
+      "append_playbook",
+    ],
+    playbooks: ["對話技巧", "反對問題拆解", "企業主傳承與退休"],
+  },
+  team: {
+    tools: ["get_week_plan", "read_playbook", "append_playbook"],
+    playbooks: ["團隊輔導", "對話技巧"],
+  },
+};
+
+const DEFAULT_MODE = "weekly";
+
+function resolveMode(mode: unknown): string {
+  return typeof mode === "string" && MODE_TOOLS[mode] ? mode : DEFAULT_MODE;
+}
+
+function buildTools(mode: string): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  const config = MODE_TOOLS[mode];
+  return TOOL_DEFS.filter((tool) => config.tools.includes(tool.name)).map((tool) => {
+    // deno-lint-ignore no-explicit-any
+    const fn = structuredClone(tool) as any;
+    // playbook 工具的 name 是 enum，逐模式收斂成該模式讀得到的那幾份
+    if (fn.parameters?.properties?.name?.enum) {
+      fn.parameters.properties.name.enum = config.playbooks;
+    }
+    return { type: "function" as const, function: fn };
+  });
+}
 
 function taipeiNow(): Date {
   return new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -553,12 +590,21 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
 
-    // 檢視畫面用：回傳目前部署中的 system prompt 與出廠 playbook 種子（不跑模型）
+    // 檢視畫面用：回傳各模式部署中的 system prompt 與出廠 playbook 種子（不跑模型）
     if (body?.action === "get_prompt") {
-      return new Response(
-        JSON.stringify({ system_prompt: SYSTEM_PROMPT, playbook_seeds: PLAYBOOK_SEEDS }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      const modes = Object.fromEntries(
+        Object.keys(MODE_TOOLS).map((mode) => [
+          mode,
+          {
+            label: MODE_PROMPTS[mode].label,
+            system_prompt: buildSystemPrompt(mode),
+            tools: MODE_TOOLS[mode].tools,
+          },
+        ])
       );
+      return new Response(JSON.stringify({ modes, playbook_seeds: PLAYBOOK_SEEDS }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const history = Array.isArray(body?.messages) ? body.messages.slice(-30) : [];
@@ -574,8 +620,11 @@ Deno.serve(async (req) => {
       baseURL: "https://api.deepseek.com",
     });
 
+    const mode = resolveMode(body?.mode);
+    const tools = buildTools(mode);
+
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt(mode) },
       ...history.map((message: { role: string; content: string }) => ({
         role: message.role === "assistant" ? ("assistant" as const) : ("user" as const),
         content: String(message.content),
@@ -590,7 +639,7 @@ Deno.serve(async (req) => {
         model: "deepseek-v4-flash",
         max_tokens: 16000,
         messages,
-        tools: TOOLS,
+        tools,
       });
 
       finalMessage = completion.choices[0]?.message ?? null;

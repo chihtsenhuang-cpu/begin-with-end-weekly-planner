@@ -1565,6 +1565,34 @@ button {
   overflow: hidden;
 }
 
+.caddie-modes {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.caddie-mode-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  color: var(--muted);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.caddie-mode-button:hover {
+  color: inherit;
+}
+
+.caddie-mode-button.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
 .caddie-messages {
   flex: 1;
   overflow-y: auto;

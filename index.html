@@ -85,9 +85,14 @@
             <button id="caddieClearBtn" type="button" class="ghost-button">清除對話</button>
           </div>
           <div class="caddie-panel">
+            <div class="caddie-modes" role="group" aria-label="Felix 模式">
+              <button type="button" class="caddie-mode-button" data-caddie-mode="weekly" aria-pressed="true">週計畫</button>
+              <button type="button" class="caddie-mode-button" data-caddie-mode="accounts" aria-pressed="false">客戶戰情</button>
+              <button type="button" class="caddie-mode-button" data-caddie-mode="team" aria-pressed="false">團隊輔導</button>
+            </div>
             <div id="caddieMessages" class="caddie-messages"></div>
             <div class="caddie-composer">
-              <textarea id="caddieInput" rows="2" placeholder="跟 Felix 聊聊本週的計畫、卡點或客戶⋯（Enter 送出，Shift+Enter 換行）"></textarea>
+              <textarea id="caddieInput" rows="2" placeholder="跟 Felix 排本週計畫、盤進度、決定先做哪件⋯（Enter 送出，Shift+Enter 換行）"></textarea>
               <button id="caddieSendBtn" type="button" class="primary-button">送出</button>
             </div>
           </div>
@@ -496,7 +501,9 @@
         <label class="field-row">
           <span>檢視</span>
           <select id="caddieInspectTarget">
-            <option value="__prompt__">System Prompt（部署中）</option>
+            <option value="mode:weekly">System Prompt：週計畫</option>
+            <option value="mode:accounts">System Prompt：客戶戰情</option>
+            <option value="mode:team">System Prompt：團隊輔導</option>
             <option value="對話技巧">Playbook：對話技巧</option>
             <option value="企業主傳承與退休">Playbook：企業主傳承與退休</option>
             <option value="反對問題拆解">Playbook：反對問題拆解</option>

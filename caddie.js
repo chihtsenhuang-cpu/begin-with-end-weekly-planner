@@ -2,20 +2,80 @@
 // 依賴 app.js 已定義的全域：supabaseClient、supabaseSession
 
 const caddieStorageKey = "begin-with-end-caddie-chat";
+const caddieModeKey = "begin-with-end-caddie-mode";
 
+// 三個模式各有自己的 system prompt、工具與對話串，切換不會把脈絡帶過去
+const CADDIE_MODES = [
+  {
+    id: "weekly",
+    label: "週計畫",
+    placeholder: "跟 Felix 排本週計畫、盤進度、決定先做哪件⋯（Enter 送出，Shift+Enter 換行）",
+    empty: "Felix 開場會先看你的週計畫和 pipeline，給一份進度快照。",
+    start: "開始本週對話",
+  },
+  {
+    id: "accounts",
+    label: "客戶戰情",
+    placeholder: "談某位客戶、設計話術、拆反對問題⋯（Enter 送出，Shift+Enter 換行）",
+    empty: "直接說要談誰、卡在哪。Felix 會先查這位客戶的資料再回。",
+    start: null,
+  },
+  {
+    id: "team",
+    label: "團隊輔導",
+    placeholder: "談帶人、輔導 member、單位目標⋯（Enter 送出，Shift+Enter 換行）",
+    empty: "直接說要談哪位 member 或哪件事。",
+    start: null,
+  },
+];
+
+let caddieMode = CADDIE_MODES[0].id;
 let caddieMessages = [];
 let caddieSending = false;
 
+function currentCaddieMode() {
+  return CADDIE_MODES.find((mode) => mode.id === caddieMode) || CADDIE_MODES[0];
+}
+
+function caddieThreadKey(mode) {
+  return `${caddieStorageKey}:${mode}`;
+}
+
 function loadCaddieMessages() {
+  const stored = sessionStorage.getItem(caddieModeKey);
+  if (CADDIE_MODES.some((mode) => mode.id === stored)) caddieMode = stored;
   try {
-    caddieMessages = JSON.parse(sessionStorage.getItem(caddieStorageKey) || "[]");
+    caddieMessages = JSON.parse(sessionStorage.getItem(caddieThreadKey(caddieMode)) || "[]");
   } catch {
     caddieMessages = [];
   }
 }
 
 function persistCaddieMessages() {
-  sessionStorage.setItem(caddieStorageKey, JSON.stringify(caddieMessages));
+  sessionStorage.setItem(caddieThreadKey(caddieMode), JSON.stringify(caddieMessages));
+}
+
+function switchCaddieMode(mode) {
+  if (mode === caddieMode || caddieSending) return;
+  caddieMode = mode;
+  sessionStorage.setItem(caddieModeKey, mode);
+  try {
+    caddieMessages = JSON.parse(sessionStorage.getItem(caddieThreadKey(mode)) || "[]");
+  } catch {
+    caddieMessages = [];
+  }
+  const input = document.querySelector("#caddieInput");
+  if (input) input.placeholder = currentCaddieMode().placeholder;
+  renderCaddieModes();
+  renderCaddie();
+}
+
+function renderCaddieModes() {
+  document.querySelectorAll("[data-caddie-mode]").forEach((button) => {
+    const active = button.dataset.caddieMode === caddieMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function caddieReady() {
@@ -119,17 +179,21 @@ function renderCaddie() {
   }
 
   if (!caddieMessages.length) {
+    const mode = currentCaddieMode();
     const empty = document.createElement("div");
     empty.className = "caddie-empty";
     const text = document.createElement("p");
     text.className = "note";
-    text.textContent = "還沒開始對話。Felix 開場會先看你的週計畫和 pipeline，給一份進度快照。";
-    const startButton = document.createElement("button");
-    startButton.type = "button";
-    startButton.className = "primary-button";
-    startButton.textContent = "開始本週對話";
-    startButton.addEventListener("click", () => sendCaddieMessage("我們開始吧。"));
-    empty.append(text, startButton);
+    text.textContent = mode.empty;
+    empty.append(text);
+    if (mode.start) {
+      const startButton = document.createElement("button");
+      startButton.type = "button";
+      startButton.className = "primary-button";
+      startButton.textContent = mode.start;
+      startButton.addEventListener("click", () => sendCaddieMessage("我們開始吧。"));
+      empty.append(startButton);
+    }
     container.append(empty);
     return;
   }
@@ -166,7 +230,7 @@ async function sendCaddieMessage(text) {
 
   try {
     const { data, error } = await supabaseClient.functions.invoke("caddie-chat", {
-      body: { messages: caddieMessages },
+      body: { messages: caddieMessages, mode: caddieMode },
     });
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
@@ -183,8 +247,8 @@ async function sendCaddieMessage(text) {
   }
 }
 
-// ── Felix 檢視：看目前部署中的 system prompt，與各 playbook 的「出廠版 vs 雲端實際讀的版本」
-let caddieInspectData = null; // { system_prompt, playbook_seeds }
+// ── Felix 檢視：看各模式部署中的 system prompt，與各 playbook 的「出廠版 vs 雲端實際讀的版本」
+let caddieInspectData = null; // { modes: { [id]: { label, system_prompt, tools } }, playbook_seeds }
 
 async function openCaddieInspect() {
   const dialog = document.querySelector("#caddieInspectDialog");
@@ -217,9 +281,12 @@ async function renderCaddieInspect() {
   const body = document.querySelector("#caddieInspectBody");
   const meta = document.querySelector("#caddieInspectMeta");
 
-  if (target === "__prompt__") {
-    body.innerHTML = renderCaddieMarkdown(caddieInspectData.system_prompt || "（空）");
-    meta.textContent = "目前部署中的 system prompt — Felix 每次回覆都讀這份，改了部署就生效，沒有雲端複本問題。";
+  if (target.startsWith("mode:")) {
+    const entry = caddieInspectData.modes?.[target.slice(5)];
+    body.innerHTML = renderCaddieMarkdown(entry?.system_prompt || "（空）");
+    meta.textContent = entry
+      ? `「${entry.label}」模式部署中的 system prompt（核心＋模式段落＋用字）· 開放工具：${entry.tools.join("、")}`
+      : "找不到這個模式。";
     return;
   }
 
@@ -251,6 +318,12 @@ function bindCaddie() {
   const clearButton = document.querySelector("#caddieClearBtn");
   const navButton = document.querySelector('[data-view="caddie"]');
   if (!input || !sendButton) return;
+
+  input.placeholder = currentCaddieMode().placeholder;
+  document.querySelectorAll("[data-caddie-mode]").forEach((button) => {
+    button.addEventListener("click", () => switchCaddieMode(button.dataset.caddieMode));
+  });
+  renderCaddieModes();
 
   const submit = () => {
     const value = input.value;
